@@ -501,11 +501,8 @@ export function StickerSheet({
           <button
             type="button"
             onClick={() => void download()}
-            disabled={loading || (Boolean(user) && (!ready || downloading))}
-            aria-disabled={loading || !user || !ready || downloading}
-            className={`w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
-              !loading && !user ? "opacity-50" : "hover:bg-orange-700"
-            }`}
+            disabled={Boolean(user) && (loading || !ready || downloading)}
+            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {downloading ? "Preparing print file…" : "Download sticker sheet"}
           </button>
@@ -527,7 +524,7 @@ export function StickerSheet({
                 </p>
               ) : null}
               {!loading && !user ? (
-                <p className="text-sm text-muted">Sign in to download this sheet.</p>
+                <p className="text-sm text-muted">Sign in to download this sheet or add more photos.</p>
               ) : null}
             </div>
           )}

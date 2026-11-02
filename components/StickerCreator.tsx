@@ -332,7 +332,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
         <h2 className="text-lg font-semibold tracking-tight">Photos</h2>
         <p className="mt-1 text-sm leading-6 text-muted">
           {guest
-            ? "Try one photo and a style. Sign in to add more photos and download the sheet."
+            ? "Upload one photo and pick a style to preview your sheet. Sign in to download it or add more photos."
             : "Upload one photo or several. Click a photo, then pick its style."}
         </p>
         <div className="mt-5">
@@ -422,15 +422,20 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               ) : null}
               {guest ? (
                 <div className="space-y-2">
-                  <button
-                    type="button"
-                    aria-disabled="true"
-                    onClick={() => setSignInPrompt("photos")}
-                    className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium opacity-50"
-                  >
+                  <label className="relative inline-flex cursor-pointer overflow-hidden rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium hover:border-stone-300">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                      aria-label="Add photos"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setSignInPrompt("photos");
+                      }}
+                      className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                    />
                     Add photos
-                  </button>
-                  <p className="text-sm text-muted">Sign in to add another photo.</p>
+                  </label>
+                  <p className="text-sm text-muted">Sign in to upload another photo or download your sheet.</p>
                 </div>
               ) : photos.length < MAX_PHOTOS ? (
                 <PhotoUpload

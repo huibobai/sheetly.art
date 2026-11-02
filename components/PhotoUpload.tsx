@@ -265,23 +265,24 @@ export function PhotoUpload({
     const unavailable = disabled || remainingExtras <= 0;
     return (
       <div className="space-y-2">
-        <button
-          type="button"
-          disabled={isBusy || unavailable}
-          aria-busy={isBusy}
-          onClick={() => inputRef.current?.click()}
-          className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium hover:border-stone-300 disabled:cursor-not-allowed disabled:opacity-50"
+        <label
+          className={`relative inline-flex overflow-hidden rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium hover:border-stone-300 ${
+            isBusy || unavailable ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+          }`}
         >
           <input
             ref={inputRef}
             type="file"
             accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
             multiple={remainingExtras > 1}
-            className="sr-only"
+            disabled={isBusy || unavailable}
+            aria-label={buttonLabel}
+            aria-busy={isBusy}
             onChange={(event) => void handleFiles(event.target.files ?? undefined)}
+            className="absolute inset-0 z-10 cursor-pointer opacity-0 disabled:cursor-not-allowed"
           />
           {isBusy ? statusLabel : buttonLabel}
-        </button>
+        </label>
         {error ? (
           <p role="alert" className="text-sm text-red-600">
             {error}
@@ -303,11 +304,7 @@ export function PhotoUpload({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        disabled={isBusy}
-        aria-busy={isBusy}
-        onClick={() => inputRef.current?.click()}
+      <label
         onDragOver={(event) => {
           event.preventDefault();
           if (!isBusy) {
@@ -320,19 +317,22 @@ export function PhotoUpload({
           setIsDragging(false);
           void handleFiles(event.dataTransfer.files);
         }}
-        className={`flex min-h-56 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:min-h-72 ${
+        className={`relative flex min-h-56 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:min-h-72 ${
           isDragging
             ? "border-accent bg-orange-50"
             : "border-border bg-surface hover:border-stone-300 hover:bg-stone-50"
-        } disabled:cursor-wait disabled:hover:border-border disabled:hover:bg-surface`}
+        } ${isBusy ? "cursor-wait" : ""}`}
       >
         <input
           ref={inputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
           multiple={remainingExtras > 1}
-          className="sr-only"
+          disabled={isBusy}
+          aria-label={statusLabel}
+          aria-busy={isBusy}
           onChange={(event) => void handleFiles(event.target.files ?? undefined)}
+          className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
         />
 
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-accent">
@@ -353,7 +353,7 @@ export function PhotoUpload({
         </span>
         <p className="mt-4 text-base font-medium">{statusLabel}</p>
         <p className="mt-1 text-sm text-muted">{statusHint}</p>
-      </button>
+      </label>
 
       {phase === "uploading" ? (
         <div
