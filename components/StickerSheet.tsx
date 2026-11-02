@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { FlowStep } from "@/components/FlowStep";
+import { PhotoUpload } from "@/components/PhotoUpload";
 import type { SheetPreset } from "@/lib/sheets";
 import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
 import {
@@ -13,8 +14,10 @@ import {
   SHEET_COUNTS,
   SHEET_SIZES,
   sheetSizeLabel,
+  type ExtraSticker,
   type SheetBackground,
   type SheetCount,
+  type SheetImage,
   type SheetSize,
 } from "@/lib/sticker-sheet";
 import { createClient } from "@/lib/supabase/client";
@@ -76,18 +79,23 @@ export function StickerSheet({
   storedPhotoUrl,
   generatedUrl,
   generatedStyle,
+  moreStickers,
+  onAddSticker,
+  onRemoveSticker,
   preset,
 }: {
   photoUrl: string | null;
   storedPhotoUrl: string | null;
   generatedUrl: string | null;
   generatedStyle: string | null;
+  moreStickers: ExtraSticker[];
+  onAddSticker: (sticker: ExtraSticker) => void;
+  onRemoveSticker: (id: string) => void;
   preset: SheetPreset | null;
 }) {
   const { user } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const bitmapRef = useRef<ImageBitmap | null>(null);
-  const loadedUrlRef = useRef<string | null>(null);
+  const bitmapCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
   const [count, setCount] = useState<SheetCount>(preset?.count ?? 9);
   const [size, setSize] = useState<SheetSize>(preset?.size ?? "a4");
   const [background, setBackground] = useState<SheetBackground>(preset?.background ?? "white");
@@ -120,8 +128,12 @@ export function StickerSheet({
   }, [preset]);
 
   useEffect(() => {
+    const cache = bitmapCacheRef.current;
     return () => {
-      bitmapRef.current?.close();
+      for (const bitmap of cache.values()) {
+        bitmap.close();
+      }
+      cache.clear();
     };
   }, []);
 
@@ -130,6 +142,10 @@ export function StickerSheet({
     (generatedStyle && generatedUrl?.startsWith("https://") ? "generated" : source);
   const savedStyle = savedSource === "generated" ? generatedStyle : null;
   const imageUrl = savedSource === "generated" && generatedUrl ? generatedUrl : photoUrl;
+  const artworkUrls = [imageUrl, ...moreStickers.map((sticker) => sticker.previewUrl)].filter(
+    (url): url is string => Boolean(url),
+  );
+  const artworkKey = artworkUrls.join("\n");
   const durableImageUrl =
     savedSource === "generated" && generatedUrl?.startsWith("https://")
       ? generatedUrl.split("#")[0]
@@ -235,7 +251,7 @@ export function StickerSheet({
   const sizeLabel = sheetSizeLabel(size);
 
   useEffect(() => {
-    if (!imageUrl) {
+    if (!artworkUrls.length) {
       if (preset) {
         setError("This saved sheet is missing its image, so it can't be previewed or downloaded.");
         setReady(false);
@@ -243,30 +259,40 @@ export function StickerSheet({
       return;
     }
 
-    const artworkUrl = imageUrl;
+    const urls = artworkUrls;
     const controller = new AbortController();
     let cancelled = false;
 
     async function render() {
       try {
-        let bitmap = bitmapRef.current;
-        if (!bitmap || loadedUrlRef.current !== imageUrl) {
-          setError(null);
-          try {
-            bitmap = await loadSheetImage(artworkUrl, controller.signal);
-          } catch {
-            if (cancelled || controller.signal.aborted) {
+        setError(null);
+        const loaded: SheetImage[] = [];
+        for (const url of urls) {
+          let bitmap = bitmapCacheRef.current.get(url);
+          if (!bitmap) {
+            try {
+              bitmap = await loadSheetImage(url, controller.signal);
+            } catch (error) {
+              if (cancelled || controller.signal.aborted) {
+                return;
+              }
+              bitmap = await loadSheetImage(url, controller.signal);
+            }
+            if (cancelled) {
+              bitmap.close();
               return;
             }
-            bitmap = await loadSheetImage(artworkUrl, controller.signal);
+            bitmapCacheRef.current.set(url, bitmap);
           }
-          if (cancelled) {
+          loaded.push(bitmap);
+        }
+
+        const keep = new Set(urls);
+        for (const [url, bitmap] of bitmapCacheRef.current) {
+          if (!keep.has(url)) {
             bitmap.close();
-            return;
+            bitmapCacheRef.current.delete(url);
           }
-          bitmapRef.current?.close();
-          bitmapRef.current = bitmap;
-          loadedUrlRef.current = imageUrl;
         }
 
         const canvas = canvasRef.current;
@@ -275,7 +301,7 @@ export function StickerSheet({
           throw new Error("The sheet preview is not on the page yet.");
         }
 
-        drawStickerSheet(context, bitmap, {
+        drawStickerSheet(context, loaded, {
           count,
           size,
           background,
@@ -305,11 +331,13 @@ export function StickerSheet({
       cancelled = true;
       controller.abort();
     };
-  }, [imageUrl, count, size, background, padding, preset]);
+    // artworkKey is the joined artwork URL list, so the preview reloads when a design is added or removed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artworkKey, count, size, background, padding, preset]);
 
   async function download() {
-    const bitmap = bitmapRef.current;
-    if (!bitmap || !ready) {
+    const bitmaps = artworkUrls.map((url) => bitmapCacheRef.current.get(url));
+    if (!ready || bitmaps.some((bitmap) => !bitmap)) {
       setError(
         imageUrl
           ? "The sheet is not ready to download yet."
@@ -328,7 +356,7 @@ export function StickerSheet({
         return;
       }
 
-      drawStickerSheet(context, bitmap, {
+      drawStickerSheet(context, bitmaps.filter((bitmap): bitmap is ImageBitmap => Boolean(bitmap)), {
         count,
         size,
         background,
@@ -357,11 +385,19 @@ export function StickerSheet({
     }
   }
 
+  const designCount = artworkUrls.length;
+  const designNote =
+    designCount <= 1
+      ? "One design repeats across the sheet. Dashed lines show where to cut."
+      : designCount >= count
+        ? "Each cell uses a different design, in order. Dashed lines show where to cut."
+        : "Designs fill the grid in order, then repeat. Dashed lines show where to cut.";
   const summaryParts = [
     `${count} stickers`,
+    designCount > 1 ? `${designCount} designs` : null,
     sizeLabel,
     backgroundLabel,
-    source === "generated" ? styleLabel(generatedStyle) : null,
+    designCount <= 1 && source === "generated" ? styleLabel(generatedStyle) : null,
     "300 DPI",
   ].filter((part): part is string => Boolean(part));
   const summary = ready ? summaryParts.join(" · ") : "Upload a photo to build your sheet.";
@@ -371,7 +407,7 @@ export function StickerSheet({
       <FlowStep
         number={3}
         title="Create your sheet"
-        hint="Choose how many stickers, the page shape, a background, and how much white border sits around each one."
+        hint="Set the count, page size, and background. Add more designs to mix the sheet. Dashed lines show where to cut."
         complete={ready}
       >
         {!imageUrl ? (
@@ -380,7 +416,49 @@ export function StickerSheet({
             <p className="mt-1 text-sm text-muted">Upload a photo in step 1 to start the sheet.</p>
           </div>
         ) : (
-          <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <div className="space-y-6">
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-medium">Designs</legend>
+              <div className="flex flex-wrap items-center gap-2">
+                {artworkUrls.map((url, index) => {
+                  const extra = index === 0 ? null : moreStickers[index - 1];
+                  const label = index === 0 ? (source === "generated" ? styleLabel(generatedStyle) ?? "Generated" : "Photo") : extra?.label ?? "Photo";
+                  return (
+                    <div key={extra?.id ?? "primary"} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt=""
+                        title={label}
+                        className="h-16 w-16 rounded-xl border border-border bg-stone-50 object-cover"
+                      />
+                      <span className="absolute bottom-1 left-1 rounded bg-white/90 px-1 text-[10px] font-semibold text-stone-700">
+                        {index + 1}
+                      </span>
+                      {extra ? (
+                        <button
+                          type="button"
+                          aria-label={`Remove ${label}`}
+                          onClick={() => onRemoveSticker(extra.id)}
+                          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-xs leading-none text-white"
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <PhotoUpload
+                  variant="button"
+                  buttonLabel="Add a photo"
+                  remainingExtras={Math.max(0, 12 - designCount)}
+                  onExtra={onAddSticker}
+                />
+              </div>
+              <p className="text-sm text-muted">{designNote}</p>
+            </fieldset>
+
+            <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
             <div className="space-y-5">
               {photoUrl && generatedUrl ? (
                 <fieldset className="space-y-2">
@@ -414,7 +492,7 @@ export function StickerSheet({
               ) : null}
 
               <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">Stickers</legend>
+                <legend className="text-sm font-medium">Per sheet</legend>
                 <div className="grid grid-cols-3 gap-2">
                   {SHEET_COUNTS.map((option) => (
                     <button
@@ -516,13 +594,14 @@ export function StickerSheet({
               </p>
             </div>
           </div>
+          </div>
         )}
       </FlowStep>
 
       <FlowStep
         number={4}
         title="Download"
-        hint="Save a high-resolution PNG. It is ready to print or share."
+        hint="Save a high-resolution PNG with cut guides. It is ready to print."
         complete={ready}
       >
         <button

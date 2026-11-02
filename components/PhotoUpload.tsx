@@ -22,6 +22,12 @@ type UploadedPhoto = {
   url: string;
 };
 
+export type UploadedExtra = {
+  id: string;
+  previewUrl: string;
+  label: string;
+};
+
 function extensionFromName(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
   if (extension === "jpg" || extension === "jpeg") return "jpg";
@@ -99,11 +105,21 @@ function uploadCompressedImage(
 export function PhotoUpload({
   onUploaded,
   onPreview,
+  onExtra,
   showHeading = true,
+  variant = "dropzone",
+  buttonLabel = "Add a photo",
+  remainingExtras = 0,
+  disabled = false,
 }: {
   onUploaded?: (photo: UploadedPhoto) => void;
   onPreview?: (url: string) => void;
+  onExtra?: (sticker: UploadedExtra) => void;
   showHeading?: boolean;
+  variant?: "dropzone" | "button";
+  buttonLabel?: string;
+  remainingExtras?: number;
+  disabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
@@ -114,18 +130,15 @@ export function PhotoUpload({
   const [uploaded, setUploaded] = useState<UploadedPhoto | null>(null);
   const isBusy = phase !== "idle";
 
-  const handleFile = useCallback(async (file: File | undefined) => {
+  const handleFile = useCallback(async (file: File | undefined, asExtra: boolean) => {
     if (!file || busyRef.current) {
-      return;
+      return false;
     }
 
     const problem = validateFile(file);
     if (problem) {
       setError(problem);
-      if (inputRef.current) {
-        inputRef.current.value = "";
-      }
-      return;
+      return false;
     }
 
     setError(null);
@@ -133,20 +146,33 @@ export function PhotoUpload({
     busyRef.current = true;
     setPhase("compressing");
     let stage: Phase = "compressing";
+    let extraId: string | null = null;
 
     try {
       const compressed = await compressImage(file);
-      onPreview?.(URL.createObjectURL(compressed.blob));
+      const previewUrl = URL.createObjectURL(compressed.blob);
+      if (asExtra) {
+        extraId = crypto.randomUUID();
+        onExtra?.({ id: extraId, previewUrl, label: "Photo" });
+      } else {
+        onPreview?.(previewUrl);
+      }
       stage = "uploading";
       setPhase("uploading");
       const path = `${crypto.randomUUID()}.${compressed.extension}`;
       await uploadCompressedImage(path, compressed.blob, compressed.contentType, setProgress);
 
       const { data } = createClient().storage.from(BUCKET).getPublicUrl(path);
-      const photo = { name: file.name, url: data.publicUrl };
-      setUploaded(photo);
-      onUploaded?.(photo);
+      if (!asExtra) {
+        const photo = { name: file.name, url: data.publicUrl };
+        setUploaded(photo);
+        onUploaded?.(photo);
+      }
+      return true;
     } catch (caught) {
+      if (asExtra && stage !== "compressing") {
+        return true;
+      }
       const denied = caught instanceof Error && caught.message === "permission";
       setError(
         stage === "compressing"
@@ -155,15 +181,42 @@ export function PhotoUpload({
             ? "Upload failed. The uploads bucket is not allowing this upload."
             : "Upload failed. Please try again.",
       );
+      return false;
     } finally {
       busyRef.current = false;
       setPhase("idle");
       setProgress(0);
-      if (inputRef.current) {
-        inputRef.current.value = "";
+    }
+  }, [onExtra, onPreview, onUploaded]);
+
+  const handleFiles = useCallback(async (list: FileList | undefined) => {
+    const files = list ? [...list] : [];
+    if (!files.length || busyRef.current) {
+      return;
+    }
+
+    let extrasLeft = remainingExtras;
+    for (let index = 0; index < files.length; index += 1) {
+      const asExtra = variant === "button" || index > 0;
+      if (asExtra && extrasLeft <= 0) {
+        break;
+      }
+      const added = await handleFile(files[index], asExtra);
+      if (!added) {
+        if (!asExtra) {
+          break;
+        }
+        continue;
+      }
+      if (asExtra) {
+        extrasLeft -= 1;
       }
     }
-  }, [onPreview, onUploaded]);
+
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  }, [handleFile, remainingExtras, variant]);
 
   const statusLabel =
     phase === "compressing"
@@ -177,7 +230,39 @@ export function PhotoUpload({
       ? "Resizing your photo to 2000px."
       : phase === "uploading"
         ? "Sending the compressed image."
-        : "PNG, JPG, or WEBP";
+        : remainingExtras > 0
+          ? "PNG, JPG, or WEBP. You can choose more than one."
+          : "PNG, JPG, or WEBP";
+
+  if (variant === "button") {
+    const unavailable = disabled || remainingExtras <= 0;
+    return (
+      <div className="space-y-2">
+        <button
+          type="button"
+          disabled={isBusy || unavailable}
+          aria-busy={isBusy}
+          onClick={() => inputRef.current?.click()}
+          className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium hover:border-stone-300 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+            multiple
+            className="sr-only"
+            onChange={(event) => void handleFiles(event.target.files ?? undefined)}
+          />
+          {isBusy ? statusLabel : buttonLabel}
+        </button>
+        {error ? (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <section className="space-y-3">
@@ -206,7 +291,7 @@ export function PhotoUpload({
         onDrop={(event) => {
           event.preventDefault();
           setIsDragging(false);
-          void handleFile(event.dataTransfer.files[0]);
+          void handleFiles(event.dataTransfer.files);
         }}
         className={`flex min-h-56 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:min-h-72 ${
           isDragging
@@ -218,8 +303,9 @@ export function PhotoUpload({
           ref={inputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+          multiple={remainingExtras > 0}
           className="sr-only"
-          onChange={(event) => void handleFile(event.target.files?.[0])}
+          onChange={(event) => void handleFiles(event.target.files ?? undefined)}
         />
 
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-accent">

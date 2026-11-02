@@ -32,6 +32,17 @@ export const SHEET_BACKGROUNDS: {
 export const PRINT_DPI = 300;
 const MM = PRINT_DPI / 25.4;
 const PREVIEW_LONG_EDGE = 1200;
+const PAGE_MARGIN_MM = 12;
+const STICKER_GAP_MM = 11;
+const CUT_INSET_MM = 1.5;
+
+export type ExtraSticker = {
+  id: string;
+  previewUrl: string;
+  label: string;
+};
+
+export type SheetImage = CanvasImageSource & { width: number; height: number };
 
 export type SheetSlot = {
   x: number;
@@ -68,8 +79,8 @@ export function previewScale(size: SheetSize) {
 
 export function layoutStickerSheet(count: SheetCount, size: SheetSize) {
   const { width, height } = sheetPixels(size);
-  const margin = Math.round(14 * MM);
-  const gap = Math.round(8 * MM);
+  const margin = Math.round(PAGE_MARGIN_MM * MM);
+  const gap = Math.round(STICKER_GAP_MM * MM);
   const { cols, rows } = sheetGrid(count, size);
   const innerWidth = width - margin * 2;
   const innerHeight = height - margin * 2;
@@ -107,9 +118,27 @@ function roundedRect(
   context.roundRect(x, y, width, height, radius);
 }
 
+function sheetImages(image: SheetImage | readonly SheetImage[]) {
+  const images = Array.isArray(image) ? image : [image];
+  return images.filter((item) => item.width > 0 && item.height > 0);
+}
+
+function drawCutGuide(context: CanvasRenderingContext2D, slot: SheetSlot) {
+  const radius = Math.round(slot.size * 0.14);
+  context.save();
+  context.strokeStyle = "#9c958c";
+  context.lineWidth = Math.max(2, Math.round(0.35 * MM));
+  context.setLineDash([Math.round(2 * MM), Math.round(1.35 * MM)]);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  roundedRect(context, slot.x, slot.y, slot.size, slot.size, radius);
+  context.stroke();
+  context.restore();
+}
+
 export function drawStickerSheet(
   context: CanvasRenderingContext2D,
-  image: CanvasImageSource & { width: number; height: number },
+  image: SheetImage | readonly SheetImage[],
   options: {
     count: SheetCount;
     size: SheetSize;
@@ -118,6 +147,7 @@ export function drawStickerSheet(
     scale?: number;
   },
 ) {
+  const images = sheetImages(image);
   const layout = layoutStickerSheet(options.count, options.size);
   const scale = options.scale ?? 1;
   const canvas = context.canvas;
@@ -127,6 +157,7 @@ export function drawStickerSheet(
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
   const paddingRatio = Math.min(Math.max(options.padding, 0), 0.28);
+  const inset = Math.round(CUT_INSET_MM * MM);
 
   context.clearRect(0, 0, layout.width, layout.height);
   const backgroundColor = SHEET_BACKGROUNDS.find((item) => item.id === options.background)?.color;
@@ -135,15 +166,23 @@ export function drawStickerSheet(
     context.fillRect(0, 0, layout.width, layout.height);
   }
 
-  for (const slot of layout.slots) {
-    const radius = Math.round(slot.size * 0.14);
-    const padding = Math.round(slot.size * paddingRatio);
-    const inner = Math.max(slot.size - padding * 2, Math.round(slot.size * 0.45));
-    const fit = Math.min(inner / image.width, inner / image.height);
-    const drawWidth = image.width * fit;
-    const drawHeight = image.height * fit;
-    const drawX = slot.x + (slot.size - drawWidth) / 2;
-    const drawY = slot.y + (slot.size - drawHeight) / 2;
+  if (!images.length) {
+    return;
+  }
+
+  layout.slots.forEach((slot, index) => {
+    const artwork = images[index % images.length];
+    const cardSize = Math.max(1, slot.size - inset * 2);
+    const cardX = slot.x + inset;
+    const cardY = slot.y + inset;
+    const radius = Math.round(cardSize * 0.14);
+    const padding = Math.round(cardSize * paddingRatio);
+    const inner = Math.max(cardSize - padding * 2, Math.round(cardSize * 0.45));
+    const fit = Math.min(inner / artwork.width, inner / artwork.height);
+    const drawWidth = artwork.width * fit;
+    const drawHeight = artwork.height * fit;
+    const drawX = cardX + (cardSize - drawWidth) / 2;
+    const drawY = cardY + (cardSize - drawHeight) / 2;
 
     context.save();
     if (options.background !== "transparent") {
@@ -151,28 +190,33 @@ export function drawStickerSheet(
       context.shadowBlur = 18;
       context.shadowOffsetY = 8;
     }
-    roundedRect(context, slot.x, slot.y, slot.size, slot.size, radius);
+    roundedRect(context, cardX, cardY, cardSize, cardSize, radius);
     context.fillStyle = "#ffffff";
     context.fill();
     context.restore();
 
     context.save();
-    roundedRect(context, slot.x, slot.y, slot.size, slot.size, radius);
+    roundedRect(context, cardX, cardY, cardSize, cardSize, radius);
     context.clip();
-    context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+    context.drawImage(artwork, drawX, drawY, drawWidth, drawHeight);
     context.restore();
 
     roundedRect(
       context,
-      slot.x + 2,
-      slot.y + 2,
-      slot.size - 4,
-      slot.size - 4,
+      cardX + 2,
+      cardY + 2,
+      cardSize - 4,
+      cardSize - 4,
       Math.max(radius - 2, 0),
     );
+    context.setLineDash([]);
     context.lineWidth = 3;
     context.strokeStyle = "#e7e5e4";
     context.stroke();
+  });
+
+  for (const slot of layout.slots) {
+    drawCutGuide(context, slot);
   }
 }
 
