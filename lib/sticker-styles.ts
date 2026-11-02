@@ -1,0 +1,56 @@
+export const STICKER_STYLES = ["cartoon", "kawaii", "watercolor", "pixel-art"] as const;
+
+export type StickerStyle = (typeof STICKER_STYLES)[number];
+
+const STICKER_FINISH =
+  "Keep the same subject, pose, and recognizable features. Present one subject as a clean die-cut sticker with a thick even white contour border. Remove the original background and place the sticker on a plain solid background. No text, no watermark, no extra objects.";
+
+export const STYLE_PROMPTS: Record<StickerStyle, string> = {
+  cartoon: `Redraw this photo as a bold cartoon sticker. Use thick black outlines, flat vibrant colors, and simple cel shading. ${STICKER_FINISH}`,
+  kawaii: `Redraw this photo as a kawaii sticker. Use rounded shapes, soft pastel colors, a gentle blush, and clean thick outlines. ${STICKER_FINISH}`,
+  watercolor: `Redraw this photo as a watercolor sticker. Use soft translucent washes, visible paper texture, and delicate ink outlines. ${STICKER_FINISH}`,
+  "pixel-art": `Redraw this photo as a pixel-art sticker. Use chunky visible pixels, a limited color palette, and crisp hard edges like a 16-bit game sprite. ${STICKER_FINISH}`,
+};
+
+export function isStickerStyle(value: string): value is StickerStyle {
+  return (STICKER_STYLES as readonly string[]).includes(value);
+}
+
+export const STYLE_LABELS: Record<StickerStyle, string> = {
+  cartoon: "Cartoon",
+  kawaii: "Kawaii",
+  watercolor: "Watercolor",
+  "pixel-art": "Pixel Art",
+};
+
+export function styleLabel(style: string | null | undefined) {
+  if (!style) {
+    return null;
+  }
+  return isStickerStyle(style) ? STYLE_LABELS[style] : style;
+}
+
+export function styleIdFromUrl(url: string | null | undefined) {
+  if (!url || !url.includes("#")) {
+    return null;
+  }
+  try {
+    const id = new URL(url).hash.replace(/^#/, "");
+    const style = new URLSearchParams(id).get("style");
+    return style && style.length > 0 ? style : null;
+  } catch {
+    return null;
+  }
+}
+
+export function urlWithStyle(url: string, style: string | null) {
+  const base = url.split("#")[0];
+  if (!style) {
+    return base;
+  }
+  return `${base}#style=${encodeURIComponent(style)}`;
+}
+
+export function urlWithoutStyle(url: string) {
+  return url.split("#")[0];
+}

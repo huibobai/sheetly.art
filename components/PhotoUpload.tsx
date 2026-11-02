@@ -1,0 +1,282 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import { compressImage } from "@/lib/compress-image";
+import { createClient } from "@/lib/supabase/client";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const BUCKET = "uploads";
+
+const ACCEPTED_TYPES: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+type Phase = "idle" | "compressing" | "uploading";
+
+type UploadedPhoto = {
+  name: string;
+  url: string;
+};
+
+function extensionFromName(name: string) {
+  const extension = name.split(".").pop()?.toLowerCase();
+  if (extension === "jpg" || extension === "jpeg") return "jpg";
+  if (extension === "png" || extension === "webp") return extension;
+  return null;
+}
+
+function validateFile(file: File) {
+  const extension = ACCEPTED_TYPES[file.type] ?? extensionFromName(file.name);
+
+  if (!extension || (file.type && !ACCEPTED_TYPES[file.type])) {
+    return "Please choose a JPG, PNG, or WEBP image.";
+  }
+
+  if (file.size > MAX_FILE_BYTES) {
+    return "This file is too big. Maximum size is 10 MB.";
+  }
+
+  return null;
+}
+
+function uploadCompressedImage(
+  path: string,
+  body: Blob,
+  contentType: string,
+  onProgress: (percent: number) => void,
+) {
+  const supabaseUrlValue = supabaseUrl().replace(/\/$/, "");
+  const supabaseKey = supabaseAnonKey();
+
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${supabaseUrlValue}/storage/v1/object/${BUCKET}/${path}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${supabaseKey}`);
+    xhr.setRequestHeader("apikey", supabaseKey);
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.setRequestHeader("cache-control", "max-age=3600");
+    xhr.setRequestHeader("x-upsert", "false");
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || event.total === 0) {
+        return;
+      }
+      onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(100);
+        resolve();
+        return;
+      }
+
+      let message = "";
+      try {
+        const body = JSON.parse(xhr.responseText) as { message?: string };
+        message = body.message ?? "";
+      } catch {
+        message = "";
+      }
+
+      if (/row-level security|unauthorized|access denied/i.test(message)) {
+        reject(new Error("permission"));
+        return;
+      }
+
+      reject(new Error("upload failed"));
+    };
+    xhr.onerror = () => reject(new Error("upload failed"));
+    xhr.onabort = () => reject(new Error("upload failed"));
+    xhr.send(body);
+  });
+}
+
+export function PhotoUpload({
+  onUploaded,
+  onPreview,
+  showHeading = true,
+}: {
+  onUploaded?: (photo: UploadedPhoto) => void;
+  onPreview?: (url: string) => void;
+  showHeading?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const busyRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [uploaded, setUploaded] = useState<UploadedPhoto | null>(null);
+  const isBusy = phase !== "idle";
+
+  const handleFile = useCallback(async (file: File | undefined) => {
+    if (!file || busyRef.current) {
+      return;
+    }
+
+    const problem = validateFile(file);
+    if (problem) {
+      setError(problem);
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+      return;
+    }
+
+    setError(null);
+    setProgress(0);
+    busyRef.current = true;
+    setPhase("compressing");
+    let stage: Phase = "compressing";
+
+    try {
+      const compressed = await compressImage(file);
+      onPreview?.(URL.createObjectURL(compressed.blob));
+      stage = "uploading";
+      setPhase("uploading");
+      const path = `${crypto.randomUUID()}.${compressed.extension}`;
+      await uploadCompressedImage(path, compressed.blob, compressed.contentType, setProgress);
+
+      const { data } = createClient().storage.from(BUCKET).getPublicUrl(path);
+      const photo = { name: file.name, url: data.publicUrl };
+      setUploaded(photo);
+      onUploaded?.(photo);
+    } catch (caught) {
+      const denied = caught instanceof Error && caught.message === "permission";
+      setError(
+        stage === "compressing"
+          ? "Could not process this image. Please try another file."
+          : denied
+            ? "Upload failed. The uploads bucket is not allowing this upload."
+            : "Upload failed. Please try again.",
+      );
+    } finally {
+      busyRef.current = false;
+      setPhase("idle");
+      setProgress(0);
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+    }
+  }, [onPreview, onUploaded]);
+
+  const statusLabel =
+    phase === "compressing"
+      ? "Compressing…"
+      : phase === "uploading"
+        ? `Uploading… ${progress}%`
+        : "Drop your photo here";
+
+  const statusHint =
+    phase === "compressing"
+      ? "Resizing your photo to 2000px."
+      : phase === "uploading"
+        ? "Sending the compressed image."
+        : "PNG, JPG, or WEBP";
+
+  return (
+    <section className="space-y-3">
+      {showHeading ? (
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Upload a photo</h2>
+          <p className="mt-1 text-sm text-muted">
+            Drag and drop an image, or click to browse. JPG, PNG, or WEBP up to 10 MB.
+            Photos are resized before upload.
+          </p>
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        disabled={isBusy}
+        aria-busy={isBusy}
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault();
+          if (!isBusy) {
+            setIsDragging(true);
+          }
+        }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          void handleFile(event.dataTransfer.files[0]);
+        }}
+        className={`flex min-h-56 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:min-h-72 ${
+          isDragging
+            ? "border-accent bg-orange-50"
+            : "border-border bg-surface hover:border-stone-300 hover:bg-stone-50"
+        } disabled:cursor-wait disabled:hover:border-border disabled:hover:bg-surface`}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+          className="sr-only"
+          onChange={(event) => void handleFile(event.target.files?.[0])}
+        />
+
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-accent">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            className={`h-6 w-6 ${phase === "compressing" ? "animate-pulse" : ""}`}
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
+            />
+          </svg>
+        </span>
+        <p className="mt-4 text-base font-medium">{statusLabel}</p>
+        <p className="mt-1 text-sm text-muted">{statusHint}</p>
+      </button>
+
+      {phase === "uploading" ? (
+        <div
+          role="progressbar"
+          aria-label="Upload progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
+          className="h-2 overflow-hidden rounded-full bg-stone-200"
+        >
+          <div
+            className="h-full rounded-full bg-accent transition-[width] duration-150 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      ) : null}
+
+      {error ? (
+        <p role="alert" className="text-sm text-red-600">
+          {error}
+        </p>
+      ) : null}
+
+      {uploaded ? (
+        <figure className="overflow-hidden rounded-2xl border border-border bg-surface p-3 sm:p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={uploaded.url}
+            alt={`Uploaded preview of ${uploaded.name}`}
+            className="mx-auto max-h-80 w-full rounded-xl object-contain"
+          />
+          <figcaption className="mt-3 truncate text-center text-sm text-muted">
+            {uploaded.name}
+          </figcaption>
+        </figure>
+      ) : null}
+    </section>
+  );
+}
