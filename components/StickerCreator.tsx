@@ -6,7 +6,17 @@ import { PhotoUpload } from "@/components/PhotoUpload";
 import { PHOTO_UPLOAD_INPUT_ID } from "@/components/UploadLink";
 import { SignInPrompt } from "@/components/SignInPrompt";
 import { StickerSheet } from "@/components/StickerSheet";
-import { presetFromRecord, SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetPreset } from "@/lib/sheets";
+import {
+  missingItemsColumn,
+  missingStyleColumn,
+  presetFromRecord,
+  SHEET_COLUMNS,
+  SHEET_COLUMNS_WITHOUT_ITEMS,
+  SHEET_COLUMNS_WITHOUT_STYLE,
+  sheetItems,
+  toSheetRecord,
+  type SheetPreset,
+} from "@/lib/sheets";
 import { isStickerStyle, STICKER_STYLES, STYLE_LABELS, styleLabel, type StickerStyle } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/client";
 
@@ -148,13 +158,22 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
 
         let row = data;
         let queryError = loadError;
+        if (queryError && missingItemsColumn(queryError)) {
+          const fallback = await supabase
+            .from("sheets")
+            .select(SHEET_COLUMNS_WITHOUT_ITEMS)
+            .eq("id", initialSheetId)
+            .maybeSingle();
+          row = fallback.data ? { ...fallback.data, items: null } : null;
+          queryError = fallback.error;
+        }
         if (queryError && missingStyleColumn(queryError)) {
           const fallback = await supabase
             .from("sheets")
             .select(SHEET_COLUMNS_WITHOUT_STYLE)
             .eq("id", initialSheetId)
             .maybeSingle();
-          row = fallback.data ? { ...fallback.data, style: null } : null;
+          row = fallback.data ? { ...fallback.data, style: null, items: null } : null;
           queryError = fallback.error;
         }
 
@@ -167,22 +186,27 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
           return;
         }
 
-        const original = (record.photo_url || record.source_image_url).split("#")[0];
-        const style = record.style && isStickerStyle(record.style) ? record.style : null;
-        const generated = record.generated_url?.split("#")[0] ?? null;
+        const restored = sheetItems(record);
+        if (!restored.length) {
+          setRestoreNote("That sheet could not be opened.");
+          return;
+        }
         setRestoreNote(null);
         setPreset(presetFromRecord(record));
-        setPhotos([
-          {
-            id: record.id,
-            previewUrl: original,
-            storedUrl: original.startsWith("https://") ? original : null,
-            style,
-            results: style && generated ? { [style]: generated } : {},
-            uploadFailed: false,
-            error: null,
-          },
-        ]);
+        setPhotos(
+          restored.map((item, index) => {
+            const style = item.style && isStickerStyle(item.style) ? item.style : null;
+            return {
+              id: `${record.id}:${index}`,
+              previewUrl: item.imageUrl,
+              storedUrl: item.photoUrl,
+              style,
+              results: style && item.imageUrl !== item.photoUrl ? { [style]: item.imageUrl } : {},
+              uploadFailed: false,
+              error: null,
+            };
+          }),
+        );
       });
 
     return () => {
@@ -466,6 +490,11 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
           pendingStyles={stylingCount}
           preset={preset}
           onRequireSignIn={() => setSignInPrompt("download")}
+          sheetPhotos={photos.map((photo) => ({
+            storedUrl: photo.storedUrl,
+            style: photo.style,
+            displayUrl: displayUrl(photo),
+          }))}
         />
       ) : null}
 

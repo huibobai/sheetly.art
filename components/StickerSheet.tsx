@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import type { SheetPreset } from "@/lib/sheets";
+import {
+  missingItemsColumn,
+  missingStyleColumn,
+  packBackground,
+  sheetSnapshot,
+  type SheetItem,
+  type SheetPreset,
+} from "@/lib/sheets";
 import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
 import {
   drawStickerSheet,
@@ -18,6 +25,43 @@ import {
   type SheetSize,
 } from "@/lib/sticker-sheet";
 import { createClient } from "@/lib/supabase/client";
+
+function httpsUrl(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const url = value.split("#")[0];
+  try {
+    if (new URL(url).protocol !== "https:") {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return url;
+}
+
+function durableSheetItems(
+  photos: { storedUrl: string | null; style: string | null; displayUrl: string }[],
+): SheetItem[] | null {
+  if (!photos.length) {
+    return null;
+  }
+  const items: SheetItem[] = [];
+  for (const photo of photos) {
+    const photoUrl = httpsUrl(photo.storedUrl);
+    if (!photoUrl) {
+      return null;
+    }
+    const style = photo.style && isStickerStyle(photo.style) ? photo.style : null;
+    const imageUrl = style ? httpsUrl(photo.displayUrl) : photoUrl;
+    if (!imageUrl) {
+      return null;
+    }
+    items.push({ photoUrl, imageUrl, style });
+  }
+  return items;
+}
 
 async function loadSheetImage(url: string, signal: AbortSignal) {
   const artworkUrl = url.split("#")[0];
@@ -79,6 +123,7 @@ export function StickerSheet({
   pendingStyles,
   preset,
   onRequireSignIn,
+  sheetPhotos,
 }: {
   artworks: string[];
   storedPhotoUrl: string | null;
@@ -87,6 +132,7 @@ export function StickerSheet({
   pendingStyles: number;
   preset: SheetPreset | null;
   onRequireSignIn?: () => void;
+  sheetPhotos: { storedUrl: string | null; style: string | null; displayUrl: string }[];
 }) {
   const { user, loading } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -126,71 +172,92 @@ export function StickerSheet({
   const generatedImage = generatedUrl?.startsWith("https://") ? generatedUrl.split("#")[0] : null;
   const styleForRow =
     generatedImage && generatedStyle && isStickerStyle(generatedStyle) ? generatedStyle : null;
-  const durableImageUrl = styleForRow
-    ? generatedImage
-    : storedPhotoUrl?.startsWith("https://")
-      ? storedPhotoUrl.split("#")[0]
-      : null;
   const imageUrl = artworkUrls[0] ?? null;
 
+  const savedItems = durableSheetItems(sheetPhotos);
+  const savedItemsRef = useRef(savedItems);
+  savedItemsRef.current = savedItems;
+  const savedKey = savedItems ? sheetSnapshot({ items: savedItems, count, size, background, padding }) : "";
+  const loadedKey = preset
+    ? sheetSnapshot({
+        items: preset.items,
+        count: preset.count,
+        size: preset.size,
+        background: preset.background,
+        padding: preset.padding,
+      })
+    : "";
+
   useEffect(() => {
-    const sheetImage = durableImageUrl;
-
-    if (!user || !sheetImage) {
-      return;
-    }
-    if (!styleForRow && !ready) {
+    const items = savedItemsRef.current;
+    if (!user || !ready || !items || !savedKey || savedKey === lastSavedRef.current || savedKey === loadedKey) {
       return;
     }
 
-    const snapshot = [sheetImage, styleForRow ? "generated" : "photo", count, size, background, padding, styleForRow ?? ""].join(
-      "|",
-    );
-    const loadedSnapshot = preset
-      ? [
-          (preset.source === "generated" ? generatedUrl : storedPhotoUrl)?.split("#")[0] ?? "",
-          preset.source,
-          preset.count,
-          preset.size,
-          preset.background,
-          preset.padding,
-          preset.style ?? "",
-        ].join("|")
-      : null;
+    const snapshot = savedKey;
 
-    if (snapshot === lastSavedRef.current || snapshot === loadedSnapshot) {
-      return;
-    }
-
-    const label = styleLabel(styleForRow);
+    const first = items[0];
+    const label = items.length === 1 ? styleLabel(first.style) : null;
     const timer = window.setTimeout(() => {
       const supabase = createClient();
       const row = {
-        source_image_url: sheetImage,
-        photo_url: storedPhotoUrl?.startsWith("https://") ? storedPhotoUrl.split("#")[0] : null,
-        generated_url: styleForRow ? generatedImage : null,
-        source: styleForRow ? "generated" : "photo",
-        style: styleForRow,
+        source_image_url: first.imageUrl,
+        photo_url: first.photoUrl,
+        generated_url: first.style ? first.imageUrl : null,
+        source: items.some((item) => item.style) ? "generated" : "photo",
+        style: first.style,
         sticker_count: count,
         sheet_size: size,
-        background,
+        background: packBackground(background, null, items),
         padding,
+        items,
       };
-      console.log("[sheets] save", { style: row.style });
+      console.log("[sheets] save", { photos: items.length, style: row.style });
       void supabase
         .from("sheets")
         .insert(row)
-        .then(({ error: saveError }) => {
-          if (saveError) {
+        .then(async ({ error: saveError }) => {
+          let payload: {
+            source_image_url: string;
+            photo_url: string;
+            generated_url: string | null;
+            source: string;
+            style?: string | null;
+            sticker_count: number;
+            sheet_size: string;
+            background: string;
+            padding: number;
+            items?: SheetItem[];
+          } = row;
+          let error = saveError;
+          if (error && missingItemsColumn(error)) {
+            const { items: _items, ...withoutItems } = payload;
+            payload = withoutItems;
+            const retry = await supabase.from("sheets").insert(payload);
+            error = retry.error;
+          }
+          if (error && missingStyleColumn(error)) {
+            const { style: _style, ...withoutStyle } = payload;
+            payload = withoutStyle;
+            const retry = await supabase.from("sheets").insert(payload);
+            error = retry.error;
+          }
+          if (error && missingItemsColumn(error) && "items" in payload) {
+            const { items: _items, ...withoutItems } = payload;
+            const retry = await supabase.from("sheets").insert(withoutItems);
+            error = retry.error;
+          }
+          if (error) {
             console.error("[sheets] save failed", {
+              photos: items.length,
               style: row.style,
-              message: saveError.message,
-              code: saveError.code,
+              message: error.message,
+              code: error.code,
             });
             setSaveNote(
-              row.style
-                ? `Couldn't save the ${label ?? row.style} sheet. ${saveError.message}`
-                : `Couldn't save this sheet. ${saveError.message}`,
+              label
+                ? `Couldn't save the ${label} sheet. ${error.message}`
+                : `Couldn't save this sheet. ${error.message}`,
             );
             return;
           }
@@ -200,21 +267,7 @@ export function StickerSheet({
     }, 800);
 
     return () => window.clearTimeout(timer);
-  }, [
-    ready,
-    user,
-    durableImageUrl,
-    count,
-    size,
-    background,
-    padding,
-    preset,
-    generatedUrl,
-    generatedImage,
-    generatedStyle,
-    storedPhotoUrl,
-    styleForRow,
-  ]);
+  }, [ready, user, savedKey, loadedKey]);
   const backgroundLabel = SHEET_BACKGROUNDS.find((item) => item.id === background)?.label ?? "White";
   const sizeLabel = sheetSizeLabel(size);
 

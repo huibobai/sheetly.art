@@ -4,10 +4,20 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { GoogleSignInButton } from "@/components/AuthControls";
 import { EmailSignInForm } from "@/components/SignInPrompt";
+import { SheetThumbnail } from "@/components/SheetThumbnail";
 import { useAuth } from "@/components/AuthProvider";
 import { SHEET_BACKGROUNDS, sheetSizeLabel } from "@/lib/sticker-sheet";
-import { SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetRecord } from "@/lib/sheets";
-import { styleLabel, urlWithoutStyle } from "@/lib/sticker-styles";
+import {
+  missingItemsColumn,
+  missingStyleColumn,
+  SHEET_COLUMNS,
+  SHEET_COLUMNS_WITHOUT_ITEMS,
+  SHEET_COLUMNS_WITHOUT_STYLE,
+  sheetItems,
+  toSheetRecord,
+  type SheetRecord,
+} from "@/lib/sheets";
+import { styleLabel } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/client";
 
 function rememberedStyle(url: string | null) {
@@ -49,12 +59,20 @@ export function SheetsList() {
 
         let rows = data;
         let queryError = error;
+        if (queryError && missingItemsColumn(queryError)) {
+          const fallback = await supabase
+            .from("sheets")
+            .select(SHEET_COLUMNS_WITHOUT_ITEMS)
+            .order("created_at", { ascending: false });
+          rows = (fallback.data ?? []).map((row) => ({ ...row, items: null }));
+          queryError = fallback.error;
+        }
         if (queryError && missingStyleColumn(queryError)) {
           const fallback = await supabase
             .from("sheets")
             .select(SHEET_COLUMNS_WITHOUT_STYLE)
             .order("created_at", { ascending: false });
-          rows = (fallback.data ?? []).map((row) => ({ ...row, style: null }));
+          rows = (fallback.data ?? []).map((row) => ({ ...row, style: null, items: null }));
           queryError = fallback.error;
         }
 
@@ -121,11 +139,16 @@ export function SheetsList() {
           year: "numeric",
         });
 
+        const photos = sheetItems(sheet);
+        const styles = [...new Set(photos.map((item) => item.style).filter((style) => style))];
         const label =
-          styleLabel(sheet.style) ??
-          styleLabel(rememberedStyle(sheet.generated_url)) ??
-          styleLabel(rememberedStyle(sheet.source_image_url)) ??
-          "Photo";
+          styles.length > 1
+            ? "Mixed"
+            : styleLabel(styles[0]) ??
+              styleLabel(sheet.style) ??
+              styleLabel(rememberedStyle(sheet.generated_url)) ??
+              styleLabel(rememberedStyle(sheet.source_image_url)) ??
+              "Photo";
 
         return (
           <li key={sheet.id}>
@@ -133,16 +156,12 @@ export function SheetsList() {
               href={`/?sheet=${sheet.id}`}
               className="block overflow-hidden rounded-2xl border border-border bg-surface transition-colors hover:border-stone-300"
             >
-              <div className="aspect-square bg-stone-50">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={urlWithoutStyle(sheet.generated_url || sheet.source_image_url)}
-                  alt={label ? `${label} sticker sheet` : "Saved sticker sheet"}
-                  className="h-full w-full object-contain"
-                />
+              <div className="flex aspect-square items-center justify-center bg-stone-50 p-2">
+                <SheetThumbnail sheet={sheet} />
               </div>
               <div className="space-y-2 p-4">
                 <p className="text-sm font-medium">
+                  {photos.length > 1 ? `${photos.length} photos · ` : ""}
                   {sheet.sticker_count} stickers · {sheetSizeLabel(sheet.sheet_size)}
                 </p>
                 <p>
