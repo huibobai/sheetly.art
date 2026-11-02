@@ -389,7 +389,7 @@ export function StickerSheet({
             <div className="space-y-5">
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium">How many</legend>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {SHEET_COUNTS.map((option) => (
                     <button
                       key={option}

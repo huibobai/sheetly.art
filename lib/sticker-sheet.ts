@@ -1,4 +1,4 @@
-export const SHEET_COUNTS = [6, 9, 12] as const;
+export const SHEET_COUNTS = [4, 6, 9, 12] as const;
 
 export type SheetCount = (typeof SHEET_COUNTS)[number];
 
@@ -32,8 +32,8 @@ export const SHEET_BACKGROUNDS: {
 export const PRINT_DPI = 300;
 const MM = PRINT_DPI / 25.4;
 const PREVIEW_LONG_EDGE = 1200;
-const PAGE_MARGIN_MM = 12;
-const STICKER_GAP_MM = 8;
+const PAGE_MARGIN_MM = 8;
+const STICKER_GAP_MM = 3.5;
 const CUT_GAP_MM = 0.45;
 
 export type ExtraSticker = {
@@ -47,10 +47,13 @@ export type SheetImage = CanvasImageSource & { width: number; height: number };
 export type SheetSlot = {
   x: number;
   y: number;
-  size: number;
+  width: number;
+  height: number;
 };
 
 export function sheetGrid(count: SheetCount, size: SheetSize) {
+  if (count === 4) return { cols: 2, rows: 2 };
+
   if (size === "square") {
     if (count === 6) return { cols: 3, rows: 2 };
     if (count === 9) return { cols: 3, rows: 3 };
@@ -77,18 +80,26 @@ export function previewScale(size: SheetSize) {
   return Math.min(1, PREVIEW_LONG_EDGE / Math.max(width, height));
 }
 
-export function layoutStickerSheet(count: SheetCount, size: SheetSize) {
+export function layoutStickerSheet(count: SheetCount, size: SheetSize, aspect = 1) {
   const { width, height } = sheetPixels(size);
   const margin = Math.round(PAGE_MARGIN_MM * MM);
   const gap = Math.round(STICKER_GAP_MM * MM);
   const { cols, rows } = sheetGrid(count, size);
   const innerWidth = width - margin * 2;
   const innerHeight = height - margin * 2;
-  const cell = Math.floor(
-    Math.min((innerWidth - gap * (cols - 1)) / cols, (innerHeight - gap * (rows - 1)) / rows),
-  );
-  const gridWidth = cell * cols + gap * (cols - 1);
-  const gridHeight = cell * rows + gap * (rows - 1);
+  const shape = Math.min(1.8, Math.max(0.55, aspect));
+  const maxWidth = (innerWidth - gap * (cols - 1)) / cols;
+  const maxHeight = (innerHeight - gap * (rows - 1)) / rows;
+  let cellWidth = maxWidth;
+  let cellHeight = cellWidth / shape;
+  if (cellHeight > maxHeight) {
+    cellHeight = maxHeight;
+    cellWidth = cellHeight * shape;
+  }
+  cellWidth = Math.max(1, Math.floor(cellWidth));
+  cellHeight = Math.max(1, Math.floor(cellHeight));
+  const gridWidth = cellWidth * cols + gap * (cols - 1);
+  const gridHeight = cellHeight * rows + gap * (rows - 1);
   const originX = Math.round((width - gridWidth) / 2);
   const originY = Math.round((height - gridHeight) / 2);
   const slots: SheetSlot[] = [];
@@ -96,9 +107,10 @@ export function layoutStickerSheet(count: SheetCount, size: SheetSize) {
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
       slots.push({
-        x: originX + col * (cell + gap),
-        y: originY + row * (cell + gap),
-        size: cell,
+        x: originX + col * (cellWidth + gap),
+        y: originY + row * (cellHeight + gap),
+        width: cellWidth,
+        height: cellHeight,
       });
     }
   }
@@ -108,9 +120,20 @@ export function layoutStickerSheet(count: SheetCount, size: SheetSize) {
 
 type Point = { x: number; y: number };
 
+type Bounds = { x: number; y: number; width: number; height: number };
+
 type DieCutSprite = {
   canvas: HTMLCanvasElement;
   contour: Point[][];
+  bounds: Bounds;
+};
+
+type StickerPlacement = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  bounds: Bounds;
 };
 
 const dieCutCache = new WeakMap<SheetImage, Map<string, DieCutSprite>>();
@@ -515,6 +538,60 @@ function maskBounds(mask: Uint8Array, width: number, height: number) {
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1, count };
 }
 
+const aspectCache = new WeakMap<SheetImage, number>();
+
+function subjectAspect(image: SheetImage) {
+  const cached = aspectCache.get(image);
+  if (cached) {
+    return cached;
+  }
+  const size = 180;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return 1;
+  }
+  const scale = Math.min(size / image.width, size / image.height);
+  context.drawImage(
+    image,
+    (size - image.width * scale) / 2,
+    (size - image.height * scale) / 2,
+    image.width * scale,
+    image.height * scale,
+  );
+  const pixels = context.getImageData(0, 0, size, size);
+  const mask = subjectMask(pixels.data, size, size);
+  const bounds = maskBounds(mask, size, size);
+  const aspect = bounds && bounds.height > 0 ? bounds.width / bounds.height : 1;
+  aspectCache.set(image, aspect);
+  return aspect;
+}
+
+function alphaBounds(image: ImageData): Bounds | null {
+  const { width, height, data } = image;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[(y * width + x) * 4 + 3] < 20) {
+        continue;
+      }
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY) {
+    return null;
+  }
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
 function smoothClosed(points: Point[]) {
   const count = points.length;
   if (count < 8) {
@@ -816,7 +893,11 @@ function buildDieCut(
   const painted = paintDieCut(source, mask, border, cut);
   context.putImageData(painted.output, 0, 0);
   const contour = painted.contour.length ? painted.contour : roundedContour(workSize, cut + 1, workSize * 0.18);
-  return { canvas, contour };
+  return {
+    canvas,
+    contour,
+    bounds: alphaBounds(painted.output) ?? { x: 0, y: 0, width: workSize, height: workSize },
+  };
 }
 
 function roundedDieCut(image: SheetImage, size: number, margin: number, border: number) {
@@ -855,6 +936,7 @@ function roundedDieCut(image: SheetImage, size: number, margin: number, border: 
   return {
     canvas,
     contour: roundedContour(size, (size - outer) / 2, radius),
+    bounds: { x: origin, y: origin, width: outer, height: outer },
   };
 }
 
@@ -886,21 +968,83 @@ function dieCutFor(
   return sprite;
 }
 
-function strokeContours(
-  context: CanvasRenderingContext2D,
-  contours: Point[][],
-  slot: SheetSlot,
-  sourceSize: number,
+function placeDieCut(sprite: DieCutSprite, slot: SheetSlot): StickerPlacement {
+  const fit = Math.min(slot.width / sprite.bounds.width, slot.height / sprite.bounds.height);
+  const width = sprite.bounds.width * fit;
+  const height = sprite.bounds.height * fit;
+  return {
+    x: slot.x + (slot.width - width) / 2,
+    y: slot.y + (slot.height - height) / 2,
+    width,
+    height,
+    bounds: sprite.bounds,
+  };
+}
+
+function buildDieCuts(
+  images: SheetImage[],
+  layout: ReturnType<typeof layoutStickerSheet>,
+  padding: number,
+  scale: number,
 ) {
-  const scale = slot.size / sourceSize;
+  const slot = layout.slots[0];
+  const slotLong = Math.max(slot.width, slot.height);
+  const slotShort = Math.min(slot.width, slot.height);
+  const borderPx = whiteBorderPx(padding, slotShort);
+  const cutGapPx = Math.max(2, CUT_GAP_MM * MM);
+  const chrome = borderPx + cutGapPx;
+  const chromeLimit = slotShort * 0.16;
+  const chromeScale = chrome > chromeLimit ? chromeLimit / chrome : 1;
+  const border = borderPx * chromeScale;
+  const cutGap = cutGapPx * chromeScale;
+  const workSize = Math.max(48, Math.round(scale < 1 ? Math.min(slotLong, 460) : slotLong));
+  const prepared = images.map((artwork) => dieCutFor(artwork, slotLong, border, cutGap, workSize));
+  return { prepared, slotShort };
+}
+
+function fitDieCuts(images: SheetImage[], count: SheetCount, size: SheetSize, padding: number, scale: number) {
+  let aspect = images.reduce((sum, artwork) => sum + subjectAspect(artwork), 0) / images.length;
+  let layout = layoutStickerSheet(count, size, aspect);
+  const probeScale = Math.min(scale, 0.35);
+  let built = buildDieCuts(images, layout, padding, probeScale);
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    const drawn =
+      built.prepared.reduce((sum, sprite) => sum + sprite.bounds.width / Math.max(1, sprite.bounds.height), 0) /
+      built.prepared.length;
+    const next = Math.min(1.8, Math.max(0.55, drawn));
+    if (Math.abs(next - aspect) <= 0.004) {
+      break;
+    }
+    aspect = next;
+    layout = layoutStickerSheet(count, size, aspect);
+    built = buildDieCuts(images, layout, padding, probeScale);
+  }
+
+  if (probeScale !== scale) {
+    built = buildDieCuts(images, layout, padding, scale);
+  }
+
+  return { layout, prepared: built.prepared, slotShort: built.slotShort };
+}
+
+function strokeContours(context: CanvasRenderingContext2D, contours: Point[][], placement: StickerPlacement) {
+  const scaleX = placement.width / placement.bounds.width;
+  const scaleY = placement.height / placement.bounds.height;
   context.beginPath();
   for (const contour of contours) {
     if (contour.length < 3) {
       continue;
     }
-    context.moveTo(slot.x + contour[0].x * scale, slot.y + contour[0].y * scale);
+    context.moveTo(
+      placement.x + (contour[0].x - placement.bounds.x) * scaleX,
+      placement.y + (contour[0].y - placement.bounds.y) * scaleY,
+    );
     for (let index = 1; index < contour.length; index += 1) {
-      context.lineTo(slot.x + contour[index].x * scale, slot.y + contour[index].y * scale);
+      context.lineTo(
+        placement.x + (contour[index].x - placement.bounds.x) * scaleX,
+        placement.y + (contour[index].y - placement.bounds.y) * scaleY,
+      );
     }
     context.closePath();
   }
@@ -919,46 +1063,54 @@ export function drawStickerSheet(
   },
 ) {
   const images = sheetImages(image);
-  const layout = layoutStickerSheet(options.count, options.size);
   const scale = options.scale ?? 1;
+  const page = sheetPixels(options.size);
   const canvas = context.canvas;
-  canvas.width = Math.max(1, Math.round(layout.width * scale));
-  canvas.height = Math.max(1, Math.round(layout.height * scale));
+  canvas.width = Math.max(1, Math.round(page.width * scale));
+  canvas.height = Math.max(1, Math.round(page.height * scale));
   context.setTransform(scale, 0, 0, scale, 0, 0);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
 
-  context.clearRect(0, 0, layout.width, layout.height);
+  context.clearRect(0, 0, page.width, page.height);
   const backgroundColor = SHEET_BACKGROUNDS.find((item) => item.id === options.background)?.color;
   if (backgroundColor) {
     context.fillStyle = backgroundColor;
-    context.fillRect(0, 0, layout.width, layout.height);
+    context.fillRect(0, 0, page.width, page.height);
   }
 
-  if (!images.length || !layout.slots.length) {
+  if (!images.length) {
     return;
   }
 
-  const slotSize = layout.slots[0].size;
-  const borderPx = whiteBorderPx(options.padding, slotSize);
-  const cutGapPx = Math.max(2, CUT_GAP_MM * MM);
-  const chrome = borderPx + cutGapPx;
-  const chromeLimit = slotSize * 0.16;
-  const chromeScale = chrome > chromeLimit ? chromeLimit / chrome : 1;
-  const border = borderPx * chromeScale;
-  const cutGap = cutGapPx * chromeScale;
-  const workSize = Math.max(48, Math.round(scale < 1 ? Math.min(slotSize, 460) : slotSize));
-  const prepared = images.map((artwork) => dieCutFor(artwork, slotSize, border, cutGap, workSize));
+  const { layout, prepared, slotShort } = fitDieCuts(
+    images,
+    options.count,
+    options.size,
+    options.padding,
+    scale,
+  );
 
-  layout.slots.forEach((slot, index) => {
+  layout.slots.forEach((cell, index) => {
     const sprite = prepared[index % prepared.length];
+    const placement = placeDieCut(sprite, cell);
     context.save();
     if (options.background !== "transparent") {
       context.shadowColor = "rgba(28, 25, 23, 0.13)";
-      context.shadowBlur = Math.max(8, slot.size * 0.028);
-      context.shadowOffsetY = Math.max(3, slot.size * 0.01);
+      context.shadowBlur = Math.max(8, slotShort * 0.028);
+      context.shadowOffsetY = Math.max(3, slotShort * 0.01);
     }
-    context.drawImage(sprite.canvas, slot.x, slot.y, slot.size, slot.size);
+    context.drawImage(
+      sprite.canvas,
+      placement.bounds.x,
+      placement.bounds.y,
+      placement.bounds.width,
+      placement.bounds.height,
+      placement.x,
+      placement.y,
+      placement.width,
+      placement.height,
+    );
     context.restore();
   });
 
@@ -969,9 +1121,9 @@ export function drawStickerSheet(
   context.setLineDash([1.55 * MM, 1.15 * MM]);
   context.lineCap = "round";
   context.lineJoin = "round";
-  layout.slots.forEach((slot, index) => {
+  layout.slots.forEach((cell, index) => {
     const sprite = prepared[index % prepared.length];
-    strokeContours(context, sprite.contour, slot, sprite.canvas.width);
+    strokeContours(context, sprite.contour, placeDieCut(sprite, cell));
   });
   context.restore();
 }
