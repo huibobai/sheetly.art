@@ -1,4 +1,13 @@
-export const STICKER_STYLES = ["cartoon", "kawaii", "watercolor", "pixel-art"] as const;
+export const STICKER_STYLES = [
+  "cartoon",
+  "kawaii",
+  "watercolor",
+  "pixel-art",
+  "anime",
+  "sketch",
+  "clay",
+  "outline",
+] as const;
 
 export type StickerStyle = (typeof STICKER_STYLES)[number];
 
@@ -10,6 +19,10 @@ export const STYLE_PROMPTS: Record<StickerStyle, string> = {
   kawaii: `Redraw this photo as a kawaii sticker. Use rounded shapes, soft pastel colors, a gentle blush, and clean thick outlines. ${STICKER_FINISH}`,
   watercolor: `Redraw this photo as a watercolor sticker. Use soft translucent washes, visible paper texture, and delicate ink outlines. ${STICKER_FINISH}`,
   "pixel-art": `Redraw this photo as a pixel-art sticker. Use chunky visible pixels, a limited color palette, and crisp hard edges like a 16-bit game sprite. ${STICKER_FINISH}`,
+  anime: `Redraw this photo as an anime sticker. Use clean ink linework, large expressive eyes, stylized features, and cel-shaded color like a studio anime frame. ${STICKER_FINISH}`,
+  sketch: `Redraw this photo as a pencil-sketch sticker. Use visible graphite strokes, light crosshatching, paper texture, and mostly monochrome shading. ${STICKER_FINISH}`,
+  clay: `Redraw this photo as a clay-sculpture sticker. Use soft polymer-clay forms, rounded shapes, slight surface texture, and gentle studio lighting like a stop-motion figure. ${STICKER_FINISH}`,
+  outline: `Redraw this photo as an outline sticker. Use one thick even black contour, a white interior, and almost no fill, like a clean die-cut line drawing. ${STICKER_FINISH}`,
 };
 
 export function isStickerStyle(value: string): value is StickerStyle {
@@ -21,6 +34,10 @@ export const STYLE_LABELS: Record<StickerStyle, string> = {
   kawaii: "Kawaii",
   watercolor: "Watercolor",
   "pixel-art": "Pixel Art",
+  anime: "Anime",
+  sketch: "Sketch",
+  clay: "Clay",
+  outline: "Outline",
 };
 
 export function styleLabel(style: string | null | undefined) {

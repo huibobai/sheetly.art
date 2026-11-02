@@ -7,6 +7,10 @@ const STYLE_HINTS: Record<StickerStyle, string> = {
   kawaii: "Soft, cute, and playful",
   watercolor: "Loose washes and texture",
   "pixel-art": "Chunky pixels, retro charm",
+  anime: "Clean lines and expressive eyes",
+  sketch: "Pencil strokes and shading",
+  clay: "Soft sculpted forms",
+  outline: "A single bold contour",
 };
 
 export function StylePicker({
@@ -27,7 +31,7 @@ export function StylePicker({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {STICKER_STYLES.map((id) => {
           const isSelected = selected === id;
 
@@ -37,25 +41,20 @@ export function StylePicker({
               type="button"
               onClick={() => onSelect(id)}
               aria-pressed={isSelected}
-              className={`rounded-2xl border bg-surface p-4 text-left transition-colors ${
+              className={`rounded-2xl border bg-surface p-3 text-left transition-colors ${
                 isSelected
                   ? "border-accent ring-2 ring-orange-100"
                   : "border-border hover:border-stone-300"
               }`}
             >
-              <div
-                className={`mb-3 h-16 rounded-xl ${
-                  id === "cartoon"
-                    ? "bg-linear-to-br from-amber-200 to-orange-300"
-                    : id === "kawaii"
-                      ? "bg-linear-to-br from-pink-200 to-rose-300"
-                      : id === "watercolor"
-                        ? "bg-linear-to-br from-sky-200 to-indigo-200"
-                        : "bg-linear-to-br from-emerald-200 to-lime-300"
-                }`}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/styles/${id}.jpg`}
+                alt=""
+                className="aspect-square w-full rounded-xl bg-stone-50 object-cover"
               />
-              <p className="font-medium">{STYLE_LABELS[id]}</p>
-              <p className="mt-1 text-sm text-muted">{STYLE_HINTS[id]}</p>
+              <p className="mt-2 text-sm font-medium">{STYLE_LABELS[id]}</p>
+              <p className="mt-0.5 text-xs text-muted sm:text-sm">{STYLE_HINTS[id]}</p>
             </button>
           );
         })}
