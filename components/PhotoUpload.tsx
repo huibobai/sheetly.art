@@ -106,15 +106,21 @@ export function PhotoUpload({
   onUploaded,
   onPreview,
   onExtra,
+  onPhoto,
+  onPhotoStored,
+  onPhotoFailed,
   showHeading = true,
   variant = "dropzone",
-  buttonLabel = "Add a photo",
+  buttonLabel = "Add photos",
   remainingExtras = 0,
   disabled = false,
 }: {
   onUploaded?: (photo: UploadedPhoto) => void;
   onPreview?: (url: string) => void;
   onExtra?: (sticker: UploadedExtra) => void;
+  onPhoto?: (photo: { id: string; previewUrl: string }) => void;
+  onPhotoStored?: (id: string, url: string) => void;
+  onPhotoFailed?: (id: string) => void;
   showHeading?: boolean;
   variant?: "dropzone" | "button";
   buttonLabel?: string;
@@ -146,14 +152,15 @@ export function PhotoUpload({
     busyRef.current = true;
     setPhase("compressing");
     let stage: Phase = "compressing";
-    let extraId: string | null = null;
+    const photoId = crypto.randomUUID();
 
     try {
       const compressed = await compressImage(file);
       const previewUrl = URL.createObjectURL(compressed.blob);
-      if (asExtra) {
-        extraId = crypto.randomUUID();
-        onExtra?.({ id: extraId, previewUrl, label: "Photo" });
+      if (onPhoto) {
+        onPhoto({ id: photoId, previewUrl });
+      } else if (asExtra) {
+        onExtra?.({ id: photoId, previewUrl, label: "Photo" });
       } else {
         onPreview?.(previewUrl);
       }
@@ -163,13 +170,19 @@ export function PhotoUpload({
       await uploadCompressedImage(path, compressed.blob, compressed.contentType, setProgress);
 
       const { data } = createClient().storage.from(BUCKET).getPublicUrl(path);
-      if (!asExtra) {
+      if (onPhoto) {
+        onPhotoStored?.(photoId, data.publicUrl);
+      } else if (!asExtra) {
         const photo = { name: file.name, url: data.publicUrl };
         setUploaded(photo);
         onUploaded?.(photo);
       }
       return true;
     } catch (caught) {
+      if (onPhoto && stage !== "compressing") {
+        onPhotoFailed?.(photoId);
+        return true;
+      }
       if (asExtra && stage !== "compressing") {
         return true;
       }
@@ -187,7 +200,7 @@ export function PhotoUpload({
       setPhase("idle");
       setProgress(0);
     }
-  }, [onExtra, onPreview, onUploaded]);
+  }, [onExtra, onPhoto, onPhotoFailed, onPhotoStored, onPreview, onUploaded]);
 
   const handleFiles = useCallback(async (list: FileList | undefined) => {
     const files = list ? [...list] : [];
@@ -197,7 +210,7 @@ export function PhotoUpload({
 
     let extrasLeft = remainingExtras;
     for (let index = 0; index < files.length; index += 1) {
-      const asExtra = variant === "button" || index > 0;
+      const asExtra = Boolean(onPhoto) || variant === "button" || index > 0;
       if (asExtra && extrasLeft <= 0) {
         break;
       }
@@ -216,22 +229,24 @@ export function PhotoUpload({
     if (inputRef.current) {
       inputRef.current.value = "";
     }
-  }, [handleFile, remainingExtras, variant]);
+  }, [handleFile, onPhoto, remainingExtras, variant]);
 
   const statusLabel =
     phase === "compressing"
       ? "Compressing…"
       : phase === "uploading"
         ? `Uploading… ${progress}%`
-        : "Drop your photo here";
+        : onPhoto
+          ? "Drop photos here"
+          : "Drop your photo here";
 
   const statusHint =
     phase === "compressing"
       ? "Resizing your photo to 2000px."
       : phase === "uploading"
         ? "Sending the compressed image."
-        : remainingExtras > 0
-          ? "PNG, JPG, or WEBP. You can choose more than one."
+        : onPhoto
+          ? "One photo or several. PNG, JPG, or WEBP."
           : "PNG, JPG, or WEBP";
 
   if (variant === "button") {

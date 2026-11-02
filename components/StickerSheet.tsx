@@ -2,8 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { FlowStep } from "@/components/FlowStep";
-import { PhotoUpload } from "@/components/PhotoUpload";
 import type { SheetPreset } from "@/lib/sheets";
 import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
 import {
@@ -14,7 +12,6 @@ import {
   SHEET_COUNTS,
   SHEET_SIZES,
   sheetSizeLabel,
-  type ExtraSticker,
   type SheetBackground,
   type SheetCount,
   type SheetImage,
@@ -75,22 +72,18 @@ async function loadSheetImage(url: string, signal: AbortSignal) {
 }
 
 export function StickerSheet({
-  photoUrl,
+  artworks,
   storedPhotoUrl,
   generatedUrl,
   generatedStyle,
-  moreStickers,
-  onAddSticker,
-  onRemoveSticker,
+  pendingStyles,
   preset,
 }: {
-  photoUrl: string | null;
+  artworks: string[];
   storedPhotoUrl: string | null;
   generatedUrl: string | null;
   generatedStyle: string | null;
-  moreStickers: ExtraSticker[];
-  onAddSticker: (sticker: ExtraSticker) => void;
-  onRemoveSticker: (id: string) => void;
+  pendingStyles: number;
   preset: SheetPreset | null;
 }) {
   const { user } = useAuth();
@@ -100,21 +93,11 @@ export function StickerSheet({
   const [size, setSize] = useState<SheetSize>(preset?.size ?? "a4");
   const [background, setBackground] = useState<SheetBackground>(preset?.background ?? "white");
   const [padding, setPadding] = useState(preset?.padding ?? 12);
-  const [source, setSource] = useState<"photo" | "generated">(
-    preset?.source ?? (generatedStyle && generatedUrl ? "generated" : "photo"),
-  );
-  const artworkChoiceRef = useRef<"photo" | "generated" | null>(preset?.source ?? null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const lastSavedRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (generatedUrl && !preset) {
-      setSource("generated");
-    }
-  }, [generatedUrl, preset]);
 
   useEffect(() => {
     if (!preset) {
@@ -124,7 +107,6 @@ export function StickerSheet({
     setSize(preset.size);
     setBackground(preset.background);
     setPadding(preset.padding);
-    setSource(preset.source);
   }, [preset]);
 
   useEffect(() => {
@@ -137,37 +119,22 @@ export function StickerSheet({
     };
   }, []);
 
-  const savedSource: "photo" | "generated" =
-    artworkChoiceRef.current ??
-    (generatedStyle && generatedUrl?.startsWith("https://") ? "generated" : source);
-  const savedStyle = savedSource === "generated" ? generatedStyle : null;
-  const imageUrl = savedSource === "generated" && generatedUrl ? generatedUrl : photoUrl;
-  const artworkUrls = [imageUrl, ...moreStickers.map((sticker) => sticker.previewUrl)].filter(
-    (url): url is string => Boolean(url),
-  );
+  const artworkUrls = artworks.filter((url) => url.length > 0);
   const artworkKey = artworkUrls.join("\n");
-  const durableImageUrl =
-    savedSource === "generated" && generatedUrl?.startsWith("https://")
-      ? generatedUrl.split("#")[0]
-      : storedPhotoUrl?.startsWith("https://")
-        ? storedPhotoUrl.split("#")[0]
-        : imageUrl?.startsWith("https://")
-          ? imageUrl.split("#")[0]
-          : null;
+  const generatedImage = generatedUrl?.startsWith("https://") ? generatedUrl.split("#")[0] : null;
+  const styleForRow =
+    generatedImage && generatedStyle && isStickerStyle(generatedStyle) ? generatedStyle : null;
+  const durableImageUrl = styleForRow
+    ? generatedImage
+    : storedPhotoUrl?.startsWith("https://")
+      ? storedPhotoUrl.split("#")[0]
+      : null;
+  const imageUrl = artworkUrls[0] ?? null;
 
   useEffect(() => {
-    const generatedImage = generatedUrl?.startsWith("https://") ? generatedUrl.split("#")[0] : null;
-    const explicitPhoto = artworkChoiceRef.current === "photo";
-    const styleForRow =
-      !explicitPhoto && generatedImage && generatedStyle && isStickerStyle(generatedStyle)
-        ? generatedStyle
-        : null;
-    const sheetImage = styleForRow && generatedImage ? generatedImage : durableImageUrl;
+    const sheetImage = durableImageUrl;
 
     if (!user || !sheetImage) {
-      return;
-    }
-    if (generatedImage && !explicitPhoto && !styleForRow) {
       return;
     }
     if (!styleForRow && !ready) {
@@ -235,17 +202,16 @@ export function StickerSheet({
     ready,
     user,
     durableImageUrl,
-    source,
     count,
     size,
     background,
     padding,
     preset,
     generatedUrl,
+    generatedImage,
     generatedStyle,
     storedPhotoUrl,
-    savedSource,
-    savedStyle,
+    styleForRow,
   ]);
   const backgroundLabel = SHEET_BACKGROUNDS.find((item) => item.id === background)?.label ?? "White";
   const sizeLabel = sheetSizeLabel(size);
@@ -385,114 +351,44 @@ export function StickerSheet({
     }
   }
 
-  const designCount = artworkUrls.length;
-  const designNote =
-    designCount <= 1
-      ? "One design repeats across the sheet. Dashed lines show where to cut."
-      : designCount >= count
-        ? "Each cell uses a different design, in order. Dashed lines show where to cut."
-        : "Designs fill the grid in order, then repeat. Dashed lines show where to cut.";
+  const photoCount = artworkUrls.length;
+  const sheetNote =
+    photoCount <= 1
+      ? "This photo repeats across the sheet. Dashed lines show where to cut."
+      : photoCount >= count
+        ? "Each photo gets its own cell, in order. Dashed lines show where to cut."
+        : "Photos fill the sheet in order, then repeat. Dashed lines show where to cut.";
   const summaryParts = [
     `${count} stickers`,
-    designCount > 1 ? `${designCount} designs` : null,
+    photoCount > 1 ? `${photoCount} photos` : null,
     sizeLabel,
     backgroundLabel,
-    designCount <= 1 && source === "generated" ? styleLabel(generatedStyle) : null,
+    photoCount === 1 && styleForRow ? styleLabel(styleForRow) : null,
     "300 DPI",
   ].filter((part): part is string => Boolean(part));
-  const summary = ready ? summaryParts.join(" · ") : "Upload a photo to build your sheet.";
+  const summary = !ready
+    ? "Preparing your sheet…"
+    : pendingStyles > 0
+      ? `Updating ${pendingStyles === 1 ? "1 style" : `${pendingStyles} styles`}…`
+      : summaryParts.join(" · ");
 
   return (
-    <>
-      <FlowStep
-        number={3}
-        title="Create your sheet"
-        hint="Set the count, page size, and background. Add more designs to mix the sheet. Dashed lines show where to cut."
-        complete={ready}
-      >
-        {!imageUrl ? (
-          <div className="rounded-2xl border border-dashed border-border bg-stone-50 px-6 py-14 text-center">
-            <p className="text-sm font-medium">Your preview will show up here</p>
-            <p className="mt-1 text-sm text-muted">Upload a photo in step 1 to start the sheet.</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            <fieldset className="space-y-3">
-              <legend className="text-sm font-medium">Designs</legend>
-              <div className="flex flex-wrap items-center gap-2">
-                {artworkUrls.map((url, index) => {
-                  const extra = index === 0 ? null : moreStickers[index - 1];
-                  const label = index === 0 ? (source === "generated" ? styleLabel(generatedStyle) ?? "Generated" : "Photo") : extra?.label ?? "Photo";
-                  return (
-                    <div key={extra?.id ?? "primary"} className="relative">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={url}
-                        alt=""
-                        title={label}
-                        className="h-16 w-16 rounded-xl border border-border bg-stone-50 object-cover"
-                      />
-                      <span className="absolute bottom-1 left-1 rounded bg-white/90 px-1 text-[10px] font-semibold text-stone-700">
-                        {index + 1}
-                      </span>
-                      {extra ? (
-                        <button
-                          type="button"
-                          aria-label={`Remove ${label}`}
-                          onClick={() => onRemoveSticker(extra.id)}
-                          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-stone-900 text-xs leading-none text-white"
-                        >
-                          ×
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })}
-                <PhotoUpload
-                  variant="button"
-                  buttonLabel="Add a photo"
-                  remainingExtras={Math.max(0, 12 - designCount)}
-                  onExtra={onAddSticker}
-                />
-              </div>
-              <p className="text-sm text-muted">{designNote}</p>
-            </fieldset>
-
-            <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
+    <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
+      <h2 className="text-lg font-semibold tracking-tight">Sticker sheet</h2>
+      <p className="mt-1 text-sm leading-6 text-muted">
+        Choose a size and how many stickers. The preview updates as styles finish.
+      </p>
+      {!imageUrl ? (
+        <div className="mt-5 rounded-2xl border border-dashed border-border bg-stone-50 px-6 py-14 text-center">
+          <p className="text-sm font-medium">Your preview will show up here</p>
+          <p className="mt-1 text-sm text-muted">Upload a photo to start the sheet.</p>
+        </div>
+      ) : (
+        <div className="mt-5 space-y-5">
+          <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
             <div className="space-y-5">
-              {photoUrl && generatedUrl ? (
-                <fieldset className="space-y-2">
-                  <legend className="text-sm font-medium">Artwork</legend>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(
-                      [
-                        ["photo", "Photo"],
-                        ["generated", "Generated"],
-                      ] as const
-                    ).map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        aria-pressed={source === id}
-                        onClick={() => {
-                          artworkChoiceRef.current = id;
-                          setSource(id);
-                        }}
-                        className={`rounded-xl border px-3 py-2 text-sm font-medium ${
-                          source === id
-                            ? "border-accent bg-orange-50 text-accent"
-                            : "border-border bg-white hover:border-stone-300"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </fieldset>
-              ) : null}
-
               <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">Per sheet</legend>
+                <legend className="text-sm font-medium">How many</legend>
                 <div className="grid grid-cols-3 gap-2">
                   {SHEET_COUNTS.map((option) => (
                     <button
@@ -589,52 +485,44 @@ export function StickerSheet({
                   className="h-auto w-full"
                 />
               </div>
-              <p className="text-center text-sm text-muted" role="status">
-                {error ?? (ready ? summary : "Preparing your sheet…")}
-              </p>
+              <p className="text-center text-sm text-muted">{sheetNote}</p>
             </div>
           </div>
-          </div>
-        )}
-      </FlowStep>
 
-      <FlowStep
-        number={4}
-        title="Download"
-        hint="Save a high-resolution PNG with cut guides. It is ready to print."
-        complete={ready}
-      >
-        <button
-          type="button"
-          onClick={() => void download()}
-          disabled={!ready || downloading}
-          className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {downloading ? "Preparing print file…" : "Download sticker sheet"}
-        </button>
-        {error ? (
-          <p role="alert" className="mt-3 text-sm text-red-600">
-            {error}
-          </p>
-        ) : (
-          <div className="mt-3 space-y-1 text-center">
-            <p className="text-sm text-muted">{summary}</p>
-            {saveNote ? (
-              <p
-                role={saveNote.startsWith("Couldn't") ? "alert" : "status"}
-                className={`text-sm ${saveNote.startsWith("Couldn't") ? "text-red-600" : "text-muted"}`}
-              >
-                {saveNote}
+          <button
+            type="button"
+            onClick={() => void download()}
+            disabled={!ready || downloading}
+            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {downloading ? "Preparing print file…" : "Download sticker sheet"}
+          </button>
+          {error ? (
+            <p role="alert" className="text-center text-sm text-red-600">
+              {error}
+            </p>
+          ) : (
+            <div className="space-y-1 text-center">
+              <p className="text-sm text-muted" role="status">
+                {summary}
               </p>
-            ) : null}
-            {!user && durableImageUrl ? (
-              <p className="text-sm text-muted">
-                Sign in if you want this sheet kept in My sheets. You can still download it.
-              </p>
-            ) : null}
-          </div>
-        )}
-      </FlowStep>
-    </>
+              {saveNote ? (
+                <p
+                  role={saveNote.startsWith("Couldn't") ? "alert" : "status"}
+                  className={`text-sm ${saveNote.startsWith("Couldn't") ? "text-red-600" : "text-muted"}`}
+                >
+                  {saveNote}
+                </p>
+              ) : null}
+              {!user && durableImageUrl ? (
+                <p className="text-sm text-muted">
+                  Sign in if you want this sheet kept in My sheets. You can still download it.
+                </p>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

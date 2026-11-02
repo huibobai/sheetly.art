@@ -1,46 +1,80 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { FlowStep } from "@/components/FlowStep";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { StickerSheet } from "@/components/StickerSheet";
-import { StylePicker } from "@/components/StylePicker";
 import { presetFromRecord, SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetPreset } from "@/lib/sheets";
-import type { ExtraSticker } from "@/lib/sticker-sheet";
-import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
+import { isStickerStyle, STICKER_STYLES, STYLE_LABELS, type StickerStyle } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/client";
+
+const MAX_PHOTOS = 12;
+
+type SheetPhoto = {
+  id: string;
+  previewUrl: string;
+  storedUrl: string | null;
+  style: StickerStyle | null;
+  results: Partial<Record<StickerStyle, string>>;
+  uploadFailed: boolean;
+  error: string | null;
+};
+
+function displayUrl(photo: SheetPhoto) {
+  if (photo.style && photo.results[photo.style]) {
+    return photo.results[photo.style] as string;
+  }
+  return photo.previewUrl;
+}
+
+function StyleSelect({
+  value,
+  onChange,
+  label,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-sm font-medium">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
+      >
+        {placeholder ? (
+          <option value="" disabled>
+            {placeholder}
+          </option>
+        ) : null}
+        <option value="photo">Photo</option>
+        {STICKER_STYLES.map((id) => (
+          <option key={id} value={id}>
+            {STYLE_LABELS[id]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 export function StickerCreator({ initialSheetId }: { initialSheetId: string | null }) {
   const { user, loading } = useAuth();
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [localPreview, setLocalPreview] = useState<string | null>(null);
-  const localPreviewRef = useRef<string | null>(null);
-  const [style, setStyle] = useState("cartoon");
-  const [generatedStyle, setGeneratedStyle] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [previewGenerated, setPreviewGenerated] = useState<string | null>(null);
-  const [moreStickers, setMoreStickers] = useState<ExtraSticker[]>([]);
-  const [generateMode, setGenerateMode] = useState<"primary" | "extra" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<SheetPhoto[]>([]);
   const [preset, setPreset] = useState<SheetPreset | null>(null);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
-  const canGenerate = Boolean(imageUrl) && !isGenerating;
-
-  const handlePreview = useCallback((url: string) => {
-    if (localPreviewRef.current) {
-      URL.revokeObjectURL(localPreviewRef.current);
-    }
-    localPreviewRef.current = url;
-    setLocalPreview(url);
-  }, []);
+  const inflightRef = useRef(new Set<string>());
+  const failedRef = useRef(new Set<string>());
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      if (localPreviewRef.current) {
-        URL.revokeObjectURL(localPreviewRef.current);
-      }
+      mountedRef.current = false;
     };
   }, []);
 
@@ -88,24 +122,22 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
           return;
         }
 
+        const original = (record.photo_url || record.source_image_url).split("#")[0];
+        const style = record.style && isStickerStyle(record.style) ? record.style : null;
+        const generated = record.generated_url?.split("#")[0] ?? null;
         setRestoreNote(null);
         setPreset(presetFromRecord(record));
-        if (record.style && isStickerStyle(record.style)) {
-          setStyle(record.style);
-        }
-        if (record.source === "generated") {
-          setGeneratedStyle(record.style);
-          setResultUrl(record.generated_url || record.source_image_url);
-          if (record.photo_url) {
-            setImageUrl(record.photo_url);
-            setLocalPreview(record.photo_url);
-          }
-          return;
-        }
-        setGeneratedStyle(null);
-        setResultUrl(null);
-        setImageUrl(record.source_image_url);
-        setLocalPreview(record.source_image_url);
+        setPhotos([
+          {
+            id: record.id,
+            previewUrl: original,
+            storedUrl: original.startsWith("https://") ? original : null,
+            style,
+            results: style && generated ? { [style]: generated } : {},
+            uploadFailed: false,
+            error: null,
+          },
+        ]);
       });
 
     return () => {
@@ -113,60 +145,125 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
     };
   }, [initialSheetId, loading, user]);
 
-  function addExtra(sticker: ExtraSticker) {
-    setMoreStickers((current) => (current.length >= 11 ? current : [...current, sticker]));
-  }
-
-  function removeExtra(id: string) {
-    setMoreStickers((current) => current.filter((sticker) => sticker.id !== id));
-  }
-
-  async function generate(mode: "primary" | "extra" = "primary") {
-    if (!imageUrl || isGenerating) {
-      return;
+  useEffect(() => {
+    for (const photo of photos) {
+      const style = photo.style;
+      if (!style || !photo.storedUrl || photo.uploadFailed || photo.results[style]) {
+        continue;
+      }
+      const key = `${photo.id}:${style}`;
+      if (inflightRef.current.has(key) || failedRef.current.has(key)) {
+        continue;
+      }
+      inflightRef.current.add(key);
+      const storedUrl = photo.storedUrl;
+      void (async () => {
+        try {
+          const response = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageUrl: storedUrl, style }),
+          });
+          const payload = (await response.json()) as { imageUrl?: string; error?: string };
+          if (!response.ok || !payload.imageUrl) {
+            throw new Error(payload.error ?? "Could not style this photo.");
+          }
+          if (!mountedRef.current) {
+            return;
+          }
+          try {
+            localStorage.setItem(`sheetly-style:${payload.imageUrl.split("#")[0]}`, style);
+          } catch {
+            // The sheet still shows the styled image in this session.
+          }
+          setPhotos((current) =>
+            current.map((item) =>
+              item.id === photo.id
+                ? { ...item, results: { ...item.results, [style]: payload.imageUrl }, error: null }
+                : item,
+            ),
+          );
+        } catch (error) {
+          if (!mountedRef.current) {
+            return;
+          }
+          failedRef.current.add(key);
+          const message = error instanceof Error ? error.message : "Could not style this photo.";
+          setPhotos((current) =>
+            current.map((item) => (item.id === photo.id && item.style === style ? { ...item, error: message } : item)),
+          );
+        } finally {
+          inflightRef.current.delete(key);
+        }
+      })();
     }
+  }, [photos]);
 
-    setGenerateMode(mode);
-    setIsGenerating(true);
-    setError(null);
-
-    try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl, style }),
-      });
-      const payload = (await response.json()) as { imageUrl?: string; error?: string };
-
-      if (!response.ok || !payload.imageUrl) {
-        setError(payload.error ?? "Could not generate a sticker. Please try again.");
-        return;
-      }
-
-      const label = styleLabel(style) ?? "Sticker";
-      try {
-        localStorage.setItem(`sheetly-style:${payload.imageUrl.split("#")[0]}`, style);
-      } catch {
-        // The sheet row still stores the style when the browser allows it.
-      }
-
-      if (mode === "extra") {
-        addExtra({ id: crypto.randomUUID(), previewUrl: payload.imageUrl, label });
-        setPreviewGenerated(payload.imageUrl);
-        return;
-      }
-
-      setPreset(null);
-      setGeneratedStyle(style);
-      setResultUrl(payload.imageUrl);
-      setPreviewGenerated(payload.imageUrl);
-    } catch {
-      setError("Could not generate a sticker. Please try again.");
-    } finally {
-      setIsGenerating(false);
-      setGenerateMode(null);
-    }
+  function addPhoto(photo: { id: string; previewUrl: string }) {
+    setPhotos((current) =>
+      current.length >= MAX_PHOTOS
+        ? current
+        : [
+            ...current,
+            { id: photo.id, previewUrl: photo.previewUrl, storedUrl: null, style: null, results: {}, uploadFailed: false, error: null },
+          ],
+    );
   }
+
+  function storePhoto(id: string, url: string) {
+    setPhotos((current) => current.map((photo) => (photo.id === id ? { ...photo, storedUrl: url } : photo)));
+  }
+
+  function failPhoto(id: string) {
+    setPhotos((current) =>
+      current.map((photo) =>
+        photo.id === id ? { ...photo, uploadFailed: true, error: "Upload didn't finish. You can still print this photo." } : photo,
+      ),
+    );
+  }
+
+  function removePhoto(id: string) {
+    setPhotos((current) => {
+      const photo = current.find((item) => item.id === id);
+      if (photo?.previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(photo.previewUrl);
+      }
+      return current.filter((item) => item.id !== id);
+    });
+  }
+
+  function chooseStyle(id: string, value: string) {
+    const style = isStickerStyle(value) ? value : null;
+    if (style) {
+      failedRef.current.delete(`${id}:${style}`);
+    }
+    setPhotos((current) =>
+      current.map((photo) =>
+        photo.id === id ? { ...photo, style, error: photo.uploadFailed ? photo.error : null } : photo,
+      ),
+    );
+  }
+
+  function applyStyleToAll(value: string) {
+    const style = isStickerStyle(value) ? value : null;
+    setPhotos((current) =>
+      current.map((photo) => {
+        if (style) {
+          failedRef.current.delete(`${photo.id}:${style}`);
+        }
+        return { ...photo, style, error: photo.uploadFailed ? photo.error : null };
+      }),
+    );
+  }
+
+  const sharedStyle = photos.every((photo) => photo.style === photos[0]?.style)
+    ? photos[0]?.style ?? "photo"
+    : "";
+  const first = photos[0];
+  const firstStyled = first?.style ? first.results[first.style] : null;
+  const stylingCount = photos.filter(
+    (photo) => photo.style && photo.storedUrl && !photo.uploadFailed && !photo.results[photo.style] && !photo.error,
+  ).length;
 
   return (
     <div className="space-y-5">
@@ -175,100 +272,96 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
           {restoreNote}
         </p>
       ) : null}
-      <FlowStep
-        number={1}
-        title="Upload a photo"
-        hint="JPG, PNG, or WEBP up to 10 MB. Drop one photo, or several to mix designs on the sheet."
-        complete={Boolean(localPreview)}
-      >
-        <PhotoUpload
-          showHeading={false}
-          remainingExtras={Math.max(0, 11 - moreStickers.length)}
-          onPreview={(url) => {
-            setPreset(null);
-            setMoreStickers([]);
-            handlePreview(url);
-          }}
-          onExtra={addExtra}
-          onUploaded={(photo) => {
-            setImageUrl(photo.url);
-            setError(null);
-          }}
-        />
-      </FlowStep>
 
-      <FlowStep
-        number={2}
-        title="Generate a style"
-        hint="Optional. Generate one style, or add several styles and the sheet will place them in the grid."
-        complete={Boolean(resultUrl) || moreStickers.some((sticker) => sticker.label !== "Photo")}
-      >
-        <StylePicker showHeading={false} selected={style} onSelect={setStyle} />
-        <div className="mt-5 space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button"
-              disabled={!canGenerate}
-              aria-busy={isGenerating && generateMode === "primary"}
-              onClick={() => void generate("primary")}
-              className={`rounded-full bg-stone-900 px-8 py-3 text-sm font-semibold text-white ${
-                canGenerate ? "hover:bg-stone-700" : "cursor-not-allowed opacity-50"
-              }`}
-            >
-              {isGenerating && generateMode === "primary" ? "Generating…" : "Generate sticker"}
-            </button>
-            <button
-              type="button"
-              disabled={!canGenerate || moreStickers.length >= 11}
-              aria-busy={isGenerating && generateMode === "extra"}
-              onClick={() => void generate("extra")}
-              className="rounded-full border border-border bg-white px-6 py-3 text-sm font-semibold hover:border-stone-300 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isGenerating && generateMode === "extra" ? "Generating…" : "Add another sticker"}
-            </button>
-          </div>
-          <p className="text-sm text-muted">
-            Generate sticker updates the main design. Add another sticker keeps it and puts a new one on the sheet.
-          </p>
-          {isGenerating ? (
-            <p className="text-sm text-muted" role="status">
-              Creating your sticker…
-            </p>
-          ) : null}
-          {error ? (
-            <p role="alert" className="text-sm text-red-600">
-              {error}
-            </p>
-          ) : null}
-          {previewGenerated || resultUrl ? (
-            <figure className="overflow-hidden rounded-2xl border border-border bg-stone-50 p-3 sm:p-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={previewGenerated ?? resultUrl ?? ""}
-                alt="Generated sticker"
-                className="mx-auto max-h-80 w-full rounded-xl object-contain"
+      <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
+        <h2 className="text-lg font-semibold tracking-tight">Photos</h2>
+        <p className="mt-1 text-sm leading-6 text-muted">
+          Upload one photo or several at once. Then pick a style for each, or use the same style for all of them.
+        </p>
+        <div className="mt-5">
+          {photos.length === 0 ? (
+            <PhotoUpload
+              showHeading={false}
+              remainingExtras={MAX_PHOTOS}
+              onPhoto={addPhoto}
+              onPhotoStored={storePhoto}
+              onPhotoFailed={failPhoto}
+            />
+          ) : (
+            <div className="space-y-4">
+              <StyleSelect
+                label="Apply one style to all"
+                value={sharedStyle}
+                placeholder={sharedStyle === "" ? "Mixed styles" : undefined}
+                onChange={applyStyleToAll}
               />
-              <figcaption className="mt-3 text-center text-sm text-muted">
-                {moreStickers.length > 0
-                  ? "Latest design. The sheet places each one in order."
-                  : `${styleLabel(generatedStyle) ?? "Generated"} sticker. The sheet repeats this design.`}
-              </figcaption>
-            </figure>
-          ) : null}
+              <ul className="space-y-3">
+                {photos.map((photo, index) => {
+                  const styling = Boolean(
+                    photo.style && !photo.uploadFailed && !photo.results[photo.style] && !photo.error,
+                  );
+                  return (
+                    <li key={photo.id} className="flex flex-col gap-3 rounded-2xl border border-border p-3 sm:flex-row sm:items-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={displayUrl(photo)}
+                        alt=""
+                        className="h-16 w-16 shrink-0 rounded-xl bg-stone-50 object-cover"
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <StyleSelect
+                          label={`Photo ${index + 1}`}
+                          value={photo.style ?? "photo"}
+                          onChange={(value) => chooseStyle(photo.id, value)}
+                        />
+                        {styling ? (
+                          <p className="text-xs text-muted" role="status">
+                            {photo.storedUrl ? "Styling…" : "Uploading…"}
+                          </p>
+                        ) : null}
+                        {photo.error ? (
+                          <p role="alert" className="text-xs text-red-600">
+                            {photo.error}
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removePhoto(photo.id)}
+                        className="shrink-0 rounded-xl border border-border px-3 py-2 text-sm font-medium hover:border-stone-300"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {photos.length < MAX_PHOTOS ? (
+                <PhotoUpload
+                  variant="button"
+                  buttonLabel="Add photos"
+                  remainingExtras={MAX_PHOTOS - photos.length}
+                  onPhoto={addPhoto}
+                  onPhotoStored={storePhoto}
+                  onPhotoFailed={failPhoto}
+                />
+              ) : null}
+            </div>
+          )}
         </div>
-      </FlowStep>
+      </section>
 
-      <StickerSheet
-        key={preset?.id ?? "draft"}
-        photoUrl={localPreview}
-        storedPhotoUrl={imageUrl}
-        generatedUrl={resultUrl}
-        generatedStyle={generatedStyle}
-        moreStickers={moreStickers}
-        onAddSticker={addExtra}
-        onRemoveSticker={removeExtra}
-        preset={preset}
-      />
+      {photos.length > 0 ? (
+        <StickerSheet
+          key={preset?.id ?? "draft"}
+          artworks={photos.map(displayUrl)}
+          storedPhotoUrl={first?.storedUrl ?? null}
+          generatedUrl={firstStyled ?? null}
+          generatedStyle={firstStyled && first?.style ? first.style : null}
+          pendingStyles={stylingCount}
+          preset={preset}
+        />
+      ) : null}
     </div>
   );
 }

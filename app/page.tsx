@@ -9,7 +9,7 @@ export default function Home({ searchParams }: PageProps<"/">) {
           Make a sticker sheet
         </h1>
         <p className="text-base leading-7 text-muted sm:text-lg">
-          Upload a photo, restyle it if you want, then download a sheet ready to print.
+          Upload photos, choose a style for each one, then download a sheet ready to print.
         </p>
       </div>
 
