@@ -52,7 +52,7 @@ export function AuthControls() {
 
   if (user) {
     return (
-      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
         <p className="max-w-48 truncate text-sm text-muted">{user.email}</p>
         <Link href="/sheets" className="text-sm font-medium">
           My sheets
@@ -65,7 +65,7 @@ export function AuthControls() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className="ml-auto flex flex-col items-end gap-2">
       <GoogleSignInButton />
       {authError ? (
         <p role="alert" className="text-sm text-red-600">
