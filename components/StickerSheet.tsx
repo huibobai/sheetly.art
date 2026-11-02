@@ -12,6 +12,7 @@ import {
   SHEET_BACKGROUNDS,
   SHEET_COUNTS,
   SHEET_SIZES,
+  sheetSizeLabel,
   type SheetBackground,
   type SheetCount,
   type SheetSize,
@@ -231,7 +232,7 @@ export function StickerSheet({
     savedStyle,
   ]);
   const backgroundLabel = SHEET_BACKGROUNDS.find((item) => item.id === background)?.label ?? "White";
-  const sizeLabel = size === "a4" ? "A4" : "Square";
+  const sizeLabel = sheetSizeLabel(size);
 
   useEffect(() => {
     if (!imageUrl) {
@@ -332,7 +333,9 @@ export function StickerSheet({
         size,
         background,
         padding: padding / 100,
+        scale: 1,
       });
+      console.log("[sheet] download canvas", canvas.width, canvas.height);
 
       const blob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob(resolve, "image/png");
@@ -433,7 +436,7 @@ export function StickerSheet({
 
               <fieldset className="space-y-2">
                 <legend className="text-sm font-medium">Sheet size</legend>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {SHEET_SIZES.map((option) => (
                     <button
                       key={option.id}

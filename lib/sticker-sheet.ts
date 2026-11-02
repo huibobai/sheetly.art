@@ -2,12 +2,17 @@ export const SHEET_COUNTS = [6, 9, 12] as const;
 
 export type SheetCount = (typeof SHEET_COUNTS)[number];
 
-export type SheetSize = "a4" | "square";
+export type SheetSize = "a4" | "square" | "4x6";
 
 export const SHEET_SIZES: { id: SheetSize; label: string }[] = [
-  { id: "a4", label: "A4" },
   { id: "square", label: "Square" },
+  { id: "a4", label: "A4" },
+  { id: "4x6", label: "4×6" },
 ];
+
+export function sheetSizeLabel(size: SheetSize) {
+  return SHEET_SIZES.find((item) => item.id === size)?.label ?? size;
+}
 
 export type SheetBackground = "white" | "transparent" | "blush" | "mint" | "lilac" | "butter";
 
@@ -49,6 +54,9 @@ export function sheetGrid(count: SheetCount, size: SheetSize) {
 export function sheetPixels(size: SheetSize) {
   if (size === "square") {
     return { width: 3000, height: 3000 };
+  }
+  if (size === "4x6") {
+    return { width: 1200, height: 1800 };
   }
   return { width: 2480, height: 3508 };
 }

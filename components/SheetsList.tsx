@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { GoogleSignInButton } from "@/components/AuthControls";
 import { useAuth } from "@/components/AuthProvider";
-import { SHEET_BACKGROUNDS } from "@/lib/sticker-sheet";
+import { SHEET_BACKGROUNDS, sheetSizeLabel } from "@/lib/sticker-sheet";
 import { SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetRecord } from "@/lib/sheets";
 import { styleLabel, urlWithoutStyle } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/client";
@@ -141,7 +141,7 @@ export function SheetsList() {
               </div>
               <div className="space-y-2 p-4">
                 <p className="text-sm font-medium">
-                  {sheet.sticker_count} stickers · {sheet.sheet_size === "a4" ? "A4" : "Square"}
+                  {sheet.sticker_count} stickers · {sheetSizeLabel(sheet.sheet_size)}
                 </p>
                 <p>
                   <span className="inline-flex rounded-full bg-stone-900 px-3 py-1 text-sm font-semibold text-white">
