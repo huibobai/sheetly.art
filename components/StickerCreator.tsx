@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import { PHOTO_UPLOAD_INPUT_ID } from "@/components/UploadLink";
 import { SignInPrompt } from "@/components/SignInPrompt";
 import { StickerSheet } from "@/components/StickerSheet";
 import { presetFromRecord, SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetPreset } from "@/lib/sheets";
@@ -343,6 +344,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               idleLabel={guest ? "Drop a photo here" : undefined}
               idleHint={guest ? "One photo to try. PNG, JPG, or WEBP." : undefined}
               onLimit={guest ? () => setSignInPrompt("photos") : undefined}
+              inputId={PHOTO_UPLOAD_INPUT_ID}
               onPhoto={addPhoto}
               onPhotoStored={storePhoto}
               onPhotoFailed={failPhoto}
@@ -424,6 +426,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                 <div className="space-y-2">
                   <label className="relative inline-flex cursor-pointer overflow-hidden rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium hover:border-stone-300">
                     <input
+                      id={PHOTO_UPLOAD_INPUT_ID}
                       type="file"
                       accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                       aria-label="Add photos"
@@ -442,6 +445,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                   variant="button"
                   buttonLabel="Add photos"
                   remainingExtras={MAX_PHOTOS - photos.length}
+                  inputId={PHOTO_UPLOAD_INPUT_ID}
                   onPhoto={addPhoto}
                   onPhotoStored={storePhoto}
                   onPhotoFailed={failPhoto}

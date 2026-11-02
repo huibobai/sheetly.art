@@ -117,6 +117,7 @@ export function PhotoUpload({
   idleLabel,
   idleHint,
   onLimit,
+  inputId,
 }: {
   onUploaded?: (photo: UploadedPhoto) => void;
   onPreview?: (url: string) => void;
@@ -132,6 +133,7 @@ export function PhotoUpload({
   idleLabel?: string;
   idleHint?: string;
   onLimit?: () => void;
+  inputId?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
@@ -272,6 +274,7 @@ export function PhotoUpload({
         >
           <input
             ref={inputRef}
+            id={inputId}
             type="file"
             accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
             multiple={remainingExtras > 1}
@@ -325,6 +328,7 @@ export function PhotoUpload({
       >
         <input
           ref={inputRef}
+          id={inputId}
           type="file"
           accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
           multiple={remainingExtras > 1}
