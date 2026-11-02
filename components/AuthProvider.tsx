@@ -8,6 +8,7 @@ type AuthContextValue = {
   user: User | null;
   loading: boolean;
   signInWithGoogle: () => Promise<string | null>;
+  signInWithEmail: (email: string) => Promise<string | null>;
   signOut: () => Promise<void>;
 };
 
@@ -64,12 +65,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return "Could not start Google sign-in. Try again.";
   }
 
+  async function signInWithEmail(email: string) {
+    const address = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      return "Enter a valid email address.";
+    }
+
+    const { error } = await supabase().auth.signInWithOtp({
+      email: address,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (!error) {
+      return null;
+    }
+    if (/redirect/i.test(error.message)) {
+      return `Add ${window.location.origin}/auth/callback to the Supabase redirect URLs, then try again.`;
+    }
+    return "Could not send the sign-in email. Try again in a moment.";
+  }
+
   async function signOut() {
     await supabase().auth.signOut();
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signInWithEmail, signOut }}>
       {children}
     </AuthContext.Provider>
   );

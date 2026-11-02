@@ -78,6 +78,7 @@ export function StickerSheet({
   generatedStyle,
   pendingStyles,
   preset,
+  onRequireSignIn,
 }: {
   artworks: string[];
   storedPhotoUrl: string | null;
@@ -85,8 +86,9 @@ export function StickerSheet({
   generatedStyle: string | null;
   pendingStyles: number;
   preset: SheetPreset | null;
+  onRequireSignIn?: () => void;
 }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bitmapCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
   const [count, setCount] = useState<SheetCount>(preset?.count ?? 9);
@@ -302,6 +304,11 @@ export function StickerSheet({
   }, [artworkKey, count, size, background, padding, preset]);
 
   async function download() {
+    if (!user) {
+      onRequireSignIn?.();
+      return;
+    }
+
     const bitmaps = artworkUrls.map((url) => bitmapCacheRef.current.get(url));
     if (!ready || bitmaps.some((bitmap) => !bitmap)) {
       setError(
@@ -494,8 +501,11 @@ export function StickerSheet({
           <button
             type="button"
             onClick={() => void download()}
-            disabled={!ready || downloading}
-            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={loading || (Boolean(user) && (!ready || downloading))}
+            aria-disabled={loading || !user || !ready || downloading}
+            className={`w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+              !loading && !user ? "opacity-50" : "hover:bg-orange-700"
+            }`}
           >
             {downloading ? "Preparing print file…" : "Download sticker sheet"}
           </button>
@@ -508,7 +518,7 @@ export function StickerSheet({
               <p className="text-sm text-muted" role="status">
                 {summary}
               </p>
-              {saveNote ? (
+              {user && saveNote ? (
                 <p
                   role={saveNote.startsWith("Couldn't") ? "alert" : "status"}
                   className={`text-sm ${saveNote.startsWith("Couldn't") ? "text-red-600" : "text-muted"}`}
@@ -516,10 +526,8 @@ export function StickerSheet({
                   {saveNote}
                 </p>
               ) : null}
-              {!user && durableImageUrl ? (
-                <p className="text-sm text-muted">
-                  Sign in if you want this sheet kept in My sheets. You can still download it.
-                </p>
+              {!loading && !user ? (
+                <p className="text-sm text-muted">Sign in to download this sheet.</p>
               ) : null}
             </div>
           )}

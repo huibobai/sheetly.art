@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import { SignInPrompt } from "@/components/SignInPrompt";
 import { StickerSheet } from "@/components/StickerSheet";
 import { presetFromRecord, SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetPreset } from "@/lib/sheets";
 import { isStickerStyle, STICKER_STYLES, STYLE_LABELS, styleLabel, type StickerStyle } from "@/lib/sticker-styles";
@@ -80,11 +81,16 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preset, setPreset] = useState<SheetPreset | null>(null);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
+  const [signInPrompt, setSignInPrompt] = useState<"photos" | "download" | null>(null);
   const inflightRef = useRef(new Set<string>());
   const failedRef = useRef(new Set<string>());
   const mountedRef = useRef(true);
   const photoIdsRef = useRef<string[]>([]);
   const selectedIntentRef = useRef<string | null>(null);
+  const guest = !loading && !user;
+  const photoCap = guest ? 1 : MAX_PHOTOS;
+  const photoCapRef = useRef(photoCap);
+  photoCapRef.current = photoCap;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -239,7 +245,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
 
   function addPhoto(photo: { id: string; previewUrl: string }) {
     setPhotos((current) =>
-      current.length >= MAX_PHOTOS || current.some((item) => item.id === photo.id)
+      current.length >= photoCapRef.current || current.some((item) => item.id === photo.id)
         ? current
         : [
             ...current,
@@ -325,13 +331,18 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       >
         <h2 className="text-lg font-semibold tracking-tight">Photos</h2>
         <p className="mt-1 text-sm leading-6 text-muted">
-          Upload one photo or several. Click a photo, then pick its style.
+          {guest
+            ? "Try one photo and a style. Sign in to add more photos and download the sheet."
+            : "Upload one photo or several. Click a photo, then pick its style."}
         </p>
         <div className="mt-5">
           {photos.length === 0 ? (
             <PhotoUpload
               showHeading={false}
-              remainingExtras={MAX_PHOTOS}
+              remainingExtras={photoCap}
+              idleLabel={guest ? "Drop a photo here" : undefined}
+              idleHint={guest ? "One photo to try. PNG, JPG, or WEBP." : undefined}
+              onLimit={guest ? () => setSignInPrompt("photos") : undefined}
               onPhoto={addPhoto}
               onPhotoStored={storePhoto}
               onPhotoFailed={failPhoto}
@@ -409,7 +420,19 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                   ) : null}
                 </div>
               ) : null}
-              {photos.length < MAX_PHOTOS ? (
+              {guest ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    aria-disabled="true"
+                    onClick={() => setSignInPrompt("photos")}
+                    className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium opacity-50"
+                  >
+                    Add photos
+                  </button>
+                  <p className="text-sm text-muted">Sign in to add another photo.</p>
+                </div>
+              ) : photos.length < MAX_PHOTOS ? (
                 <PhotoUpload
                   variant="button"
                   buttonLabel="Add photos"
@@ -433,8 +456,15 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
           generatedStyle={firstStyled && first?.style ? first.style : null}
           pendingStyles={stylingCount}
           preset={preset}
+          onRequireSignIn={() => setSignInPrompt("download")}
         />
       ) : null}
+
+      <SignInPrompt
+        open={signInPrompt !== null}
+        title={signInPrompt === "download" ? "Sign in to download your sheet" : "Sign in to add more photos"}
+        onClose={() => setSignInPrompt(null)}
+      />
     </div>
   );
 }

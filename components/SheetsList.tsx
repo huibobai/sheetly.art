@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { GoogleSignInButton } from "@/components/AuthControls";
+import { EmailSignInForm } from "@/components/SignInPrompt";
 import { useAuth } from "@/components/AuthProvider";
 import { SHEET_BACKGROUNDS, sheetSizeLabel } from "@/lib/sticker-sheet";
 import { SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetRecord } from "@/lib/sheets";
@@ -85,9 +86,10 @@ export function SheetsList() {
     return (
       <div className="max-w-lg space-y-4 rounded-3xl border border-border bg-surface p-6">
         <p className="text-sm leading-6 text-muted">
-          Sign in to see sheets you have saved. You can still make and download sheets without an account.
+          Sign in to see sheets you have saved, add more than one photo, and download a print-ready file.
         </p>
         <GoogleSignInButton />
+        <EmailSignInForm />
       </div>
     );
   }

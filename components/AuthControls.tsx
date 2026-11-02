@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 
-export function GoogleSignInButton() {
+export function GoogleSignInButton({ fullWidth = false }: { fullWidth?: boolean }) {
   const { signInWithGoogle } = useAuth();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +26,9 @@ export function GoogleSignInButton() {
         type="button"
         onClick={() => void start()}
         disabled={pending}
-        className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:opacity-50"
+        className={`rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:opacity-50 ${
+          fullWidth ? "w-full" : ""
+        }`}
       >
         {pending ? "Redirecting…" : "Sign in with Google"}
       </button>

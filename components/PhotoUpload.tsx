@@ -114,6 +114,9 @@ export function PhotoUpload({
   buttonLabel = "Add photos",
   remainingExtras = 0,
   disabled = false,
+  idleLabel,
+  idleHint,
+  onLimit,
 }: {
   onUploaded?: (photo: UploadedPhoto) => void;
   onPreview?: (url: string) => void;
@@ -126,6 +129,9 @@ export function PhotoUpload({
   buttonLabel?: string;
   remainingExtras?: number;
   disabled?: boolean;
+  idleLabel?: string;
+  idleHint?: string;
+  onLimit?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
@@ -209,9 +215,11 @@ export function PhotoUpload({
     }
 
     let extrasLeft = remainingExtras;
+    let hitLimit = false;
     for (let index = 0; index < files.length; index += 1) {
       const asExtra = Boolean(onPhoto) || variant === "button" || index > 0;
       if (asExtra && extrasLeft <= 0) {
+        hitLimit = true;
         break;
       }
       const added = await handleFile(files[index], asExtra);
@@ -226,10 +234,14 @@ export function PhotoUpload({
       }
     }
 
+    if (hitLimit) {
+      onLimit?.();
+    }
+
     if (inputRef.current) {
       inputRef.current.value = "";
     }
-  }, [handleFile, onPhoto, remainingExtras, variant]);
+  }, [handleFile, onLimit, onPhoto, remainingExtras, variant]);
 
   const statusLabel =
     phase === "compressing"
@@ -237,7 +249,7 @@ export function PhotoUpload({
       : phase === "uploading"
         ? `Uploading… ${progress}%`
         : onPhoto
-          ? "Drop photos here"
+          ? (idleLabel ?? "Drop photos here")
           : "Drop your photo here";
 
   const statusHint =
@@ -246,7 +258,7 @@ export function PhotoUpload({
       : phase === "uploading"
         ? "Sending the compressed image."
         : onPhoto
-          ? "One photo or several. PNG, JPG, or WEBP."
+          ? (idleHint ?? "One photo or several. PNG, JPG, or WEBP.")
           : "PNG, JPG, or WEBP";
 
   if (variant === "button") {
@@ -264,7 +276,7 @@ export function PhotoUpload({
             ref={inputRef}
             type="file"
             accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-            multiple
+            multiple={remainingExtras > 1}
             className="sr-only"
             onChange={(event) => void handleFiles(event.target.files ?? undefined)}
           />
@@ -318,7 +330,7 @@ export function PhotoUpload({
           ref={inputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-          multiple={remainingExtras > 0}
+          multiple={remainingExtras > 1}
           className="sr-only"
           onChange={(event) => void handleFiles(event.target.files ?? undefined)}
         />
