@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Sheetly",
-  description: "Turn photos into sticker sheets",
+  description: "Turn any photo into a custom sticker sheet you can print.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
