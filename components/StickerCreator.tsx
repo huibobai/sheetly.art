@@ -318,7 +318,11 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
         </p>
       ) : null}
 
-      <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
+      <section
+        id="upload"
+        tabIndex={-1}
+        className="scroll-mt-6 rounded-3xl border border-border bg-surface p-5 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-7"
+      >
         <h2 className="text-lg font-semibold tracking-tight">Photos</h2>
         <p className="mt-1 text-sm leading-6 text-muted">
           Upload one photo or several. Click a photo, then pick its style.

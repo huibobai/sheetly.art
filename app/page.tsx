@@ -1,17 +1,19 @@
 import { Suspense } from "react";
 import { StickerCreator } from "@/components/StickerCreator";
+import { UploadLink } from "@/components/UploadLink";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
     <div className="space-y-10">
-      <div className="max-w-2xl space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-          Make a sticker sheet
+      <section className="max-w-2xl space-y-5 pt-2 sm:pt-4">
+        <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
+          Turn any photo into custom stickers
         </h1>
         <p className="text-base leading-7 text-muted sm:text-lg">
-          Upload photos, choose a style for each one, then download a sheet ready to print.
+          Upload a photo, choose a style, and download a die-cut sheet ready to print.
         </p>
-      </div>
+        <UploadLink />
+      </section>
 
       <Suspense fallback={<p className="text-sm text-muted">Loading the editor…</p>}>
         <HomeEditor searchParams={searchParams} />
