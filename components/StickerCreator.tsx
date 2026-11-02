@@ -83,6 +83,8 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   const inflightRef = useRef(new Set<string>());
   const failedRef = useRef(new Set<string>());
   const mountedRef = useRef(true);
+  const photoIdsRef = useRef<string[]>([]);
+  const selectedIntentRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -92,14 +94,27 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   }, []);
 
   useEffect(() => {
-    if (photos.length === 0) {
+    const ids = photos.map((photo) => photo.id);
+    const added = ids.filter((id) => !photoIdsRef.current.includes(id));
+    photoIdsRef.current = ids;
+
+    if (ids.length === 0) {
+      selectedIntentRef.current = null;
       setSelectedId(null);
       return;
     }
-    if (!photos.some((photo) => photo.id === selectedId)) {
-      setSelectedId(photos[0].id);
+
+    if (added.length > 0) {
+      selectedIntentRef.current = added[added.length - 1];
+      setSelectedId(selectedIntentRef.current);
+      return;
     }
-  }, [photos, selectedId]);
+
+    if (!selectedIntentRef.current || !ids.includes(selectedIntentRef.current)) {
+      selectedIntentRef.current = ids[0];
+      setSelectedId(ids[0]);
+    }
+  }, [photos]);
 
   useEffect(() => {
     if (!initialSheetId || loading) {
@@ -224,11 +239,19 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
 
   function addPhoto(photo: { id: string; previewUrl: string }) {
     setPhotos((current) =>
-      current.length >= MAX_PHOTOS
+      current.length >= MAX_PHOTOS || current.some((item) => item.id === photo.id)
         ? current
         : [
             ...current,
-            { id: photo.id, previewUrl: photo.previewUrl, storedUrl: null, style: null, results: {}, uploadFailed: false, error: null },
+            {
+              id: photo.id,
+              previewUrl: photo.previewUrl,
+              storedUrl: null,
+              style: null,
+              results: {},
+              uploadFailed: false,
+              error: null,
+            },
           ],
     );
   }
@@ -322,7 +345,10 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                       <button
                         type="button"
                         aria-pressed={active}
-                        onClick={() => setSelectedId(photo.id)}
+                        onClick={() => {
+                          selectedIntentRef.current = photo.id;
+                          setSelectedId(photo.id);
+                        }}
                         className={`w-full rounded-2xl border p-1.5 text-center ${
                           active
                             ? "border-accent bg-orange-50 ring-2 ring-orange-100"
