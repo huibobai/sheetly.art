@@ -7,6 +7,8 @@ import type { SheetPreset } from "@/lib/sheets";
 import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
 import {
   drawStickerSheet,
+  pngBlobWithDpi,
+  previewScale,
   SHEET_BACKGROUNDS,
   SHEET_COUNTS,
   SHEET_SIZES,
@@ -96,6 +98,7 @@ export function StickerSheet({
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const lastSavedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -276,6 +279,7 @@ export function StickerSheet({
           size,
           background,
           padding: padding / 100,
+          scale: previewScale(size),
         });
         if (!cancelled) {
           setReady(true);
@@ -302,9 +306,9 @@ export function StickerSheet({
     };
   }, [imageUrl, count, size, background, padding, preset]);
 
-  function download() {
-    const canvas = canvasRef.current;
-    if (!canvas || !ready) {
+  async function download() {
+    const bitmap = bitmapRef.current;
+    if (!bitmap || !ready) {
       setError(
         imageUrl
           ? "The sheet is not ready to download yet."
@@ -313,18 +317,41 @@ export function StickerSheet({
       return;
     }
 
-    canvas.toBlob((blob) => {
+    setDownloading(true);
+    setError(null);
+    try {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) {
+        setError("Could not create the PNG. Open the sheet again and retry the download.");
+        return;
+      }
+
+      drawStickerSheet(context, bitmap, {
+        count,
+        size,
+        background,
+        padding: padding / 100,
+      });
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/png");
+      });
       if (!blob) {
         setError("Could not create the PNG. Open the sheet again and retry the download.");
         return;
       }
-      const url = URL.createObjectURL(blob);
+
+      const printBlob = await pngBlobWithDpi(blob);
+      const url = URL.createObjectURL(printBlob);
       const link = document.createElement("a");
       link.href = url;
       link.download = "sheetly-sticker-sheet.png";
       link.click();
       URL.revokeObjectURL(url);
-    }, "image/png");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   const summaryParts = [
@@ -497,11 +524,11 @@ export function StickerSheet({
       >
         <button
           type="button"
-          onClick={download}
-          disabled={!ready}
+          onClick={() => void download()}
+          disabled={!ready || downloading}
           className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Download sticker sheet
+          {downloading ? "Preparing print file…" : "Download sticker sheet"}
         </button>
         {error ? (
           <p role="alert" className="mt-3 text-sm text-red-600">

@@ -24,8 +24,9 @@ export const SHEET_BACKGROUNDS: {
   { id: "butter", label: "Butter", color: "#fbf3d8" },
 ];
 
-const DPI = 300;
-const MM = DPI / 25.4;
+export const PRINT_DPI = 300;
+const MM = PRINT_DPI / 25.4;
+const PREVIEW_LONG_EDGE = 1200;
 
 export type SheetSlot = {
   x: number;
@@ -46,11 +47,15 @@ export function sheetGrid(count: SheetCount, size: SheetSize) {
 }
 
 export function sheetPixels(size: SheetSize) {
-  const width = Math.round(210 * MM);
   if (size === "square") {
-    return { width, height: width };
+    return { width: 3000, height: 3000 };
   }
-  return { width, height: Math.round(297 * MM) };
+  return { width: 2480, height: 3508 };
+}
+
+export function previewScale(size: SheetSize) {
+  const { width, height } = sheetPixels(size);
+  return Math.min(1, PREVIEW_LONG_EDGE / Math.max(width, height));
 }
 
 export function layoutStickerSheet(count: SheetCount, size: SheetSize) {
@@ -102,12 +107,17 @@ export function drawStickerSheet(
     size: SheetSize;
     background: SheetBackground;
     padding: number;
+    scale?: number;
   },
 ) {
   const layout = layoutStickerSheet(options.count, options.size);
+  const scale = options.scale ?? 1;
   const canvas = context.canvas;
-  canvas.width = layout.width;
-  canvas.height = layout.height;
+  canvas.width = Math.max(1, Math.round(layout.width * scale));
+  canvas.height = Math.max(1, Math.round(layout.height * scale));
+  context.setTransform(scale, 0, 0, scale, 0, 0);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
   const paddingRatio = Math.min(Math.max(options.padding, 0), 0.28);
 
   context.clearRect(0, 0, layout.width, layout.height);
@@ -121,9 +131,9 @@ export function drawStickerSheet(
     const radius = Math.round(slot.size * 0.14);
     const padding = Math.round(slot.size * paddingRatio);
     const inner = Math.max(slot.size - padding * 2, Math.round(slot.size * 0.45));
-    const scale = Math.min(inner / image.width, inner / image.height);
-    const drawWidth = image.width * scale;
-    const drawHeight = image.height * scale;
+    const fit = Math.min(inner / image.width, inner / image.height);
+    const drawWidth = image.width * fit;
+    const drawHeight = image.height * fit;
     const drawX = slot.x + (slot.size - drawWidth) / 2;
     const drawY = slot.y + (slot.size - drawHeight) / 2;
 
@@ -156,4 +166,64 @@ export function drawStickerSheet(
     context.strokeStyle = "#e7e5e4";
     context.stroke();
   }
+}
+
+function pngCrc32(data: Uint8Array) {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+export async function pngBlobWithDpi(blob: Blob, dpi = PRINT_DPI) {
+  const source = new Uint8Array(await blob.arrayBuffer());
+  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (source.length < 8 || pngSignature.some((byte, index) => source[index] !== byte)) {
+    return blob;
+  }
+
+  const ppm = Math.round((dpi / 25.4) * 1000);
+  const chunkData = new Uint8Array(9);
+  const dataView = new DataView(chunkData.buffer);
+  dataView.setUint32(0, ppm);
+  dataView.setUint32(4, ppm);
+  chunkData[8] = 1;
+
+  const typeAndData = new Uint8Array(13);
+  typeAndData.set([112, 72, 89, 115], 0);
+  typeAndData.set(chunkData, 4);
+  const crc = pngCrc32(typeAndData);
+
+  const chunk = new Uint8Array(21);
+  const chunkView = new DataView(chunk.buffer);
+  chunkView.setUint32(0, 9);
+  chunk.set(typeAndData, 4);
+  chunkView.setUint32(17, crc);
+
+  const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  let offset = 8;
+  while (offset + 8 <= source.length) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(
+      source[offset + 4],
+      source[offset + 5],
+      source[offset + 6],
+      source[offset + 7],
+    );
+    if (type === "IHDR") {
+      const insertAt = offset + 12 + length;
+      const output = new Uint8Array(source.length + chunk.length);
+      output.set(source.subarray(0, insertAt), 0);
+      output.set(chunk, insertAt);
+      output.set(source.subarray(insertAt), insertAt + chunk.length);
+      return new Blob([output], { type: "image/png" });
+    }
+    offset += 12 + length;
+  }
+
+  return blob;
 }
