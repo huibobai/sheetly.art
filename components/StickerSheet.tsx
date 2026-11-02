@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { FlowStep } from "@/components/FlowStep";
-import { missingStyleColumn, packBackground, type SheetPreset } from "@/lib/sheets";
-import { styleLabel, urlWithStyle } from "@/lib/sticker-styles";
+import type { SheetPreset } from "@/lib/sheets";
+import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
 import {
   drawStickerSheet,
   SHEET_BACKGROUNDS,
@@ -136,18 +136,25 @@ export function StickerSheet({
           : null;
 
   useEffect(() => {
-    if (!user || !durableImageUrl) {
-      return;
-    }
-
+    const generatedImage = generatedUrl?.startsWith("https://") ? generatedUrl.split("#")[0] : null;
+    const explicitPhoto = artworkChoiceRef.current === "photo";
     const styleForRow =
-      generatedStyle && generatedUrl?.startsWith("https://") ? generatedStyle : null;
-    const generationReady = styleForRow !== null;
-    if (!ready && !generationReady) {
+      !explicitPhoto && generatedImage && generatedStyle && isStickerStyle(generatedStyle)
+        ? generatedStyle
+        : null;
+    const sheetImage = styleForRow && generatedImage ? generatedImage : durableImageUrl;
+
+    if (!user || !sheetImage) {
+      return;
+    }
+    if (generatedImage && !explicitPhoto && !styleForRow) {
+      return;
+    }
+    if (!styleForRow && !ready) {
       return;
     }
 
-    const snapshot = [durableImageUrl, savedSource, count, size, background, padding, styleForRow ?? ""].join(
+    const snapshot = [sheetImage, styleForRow ? "generated" : "photo", count, size, background, padding, styleForRow ?? ""].join(
       "|",
     );
     const loadedSnapshot = preset
@@ -169,52 +176,31 @@ export function StickerSheet({
     const label = styleLabel(styleForRow);
     const timer = window.setTimeout(() => {
       const supabase = createClient();
-      const generatedImage = generatedUrl?.startsWith("https://") ? generatedUrl.split("#")[0] : null;
-      const sheetImage = styleForRow && generatedImage ? generatedImage : durableImageUrl;
       const row = {
-        source_image_url: urlWithStyle(sheetImage, styleForRow),
+        source_image_url: sheetImage,
         photo_url: storedPhotoUrl?.startsWith("https://") ? storedPhotoUrl.split("#")[0] : null,
-        generated_url: generatedImage ? urlWithStyle(generatedImage, styleForRow) : null,
-        source: styleForRow ? "generated" : savedSource,
+        generated_url: styleForRow ? generatedImage : null,
+        source: styleForRow ? "generated" : "photo",
         style: styleForRow,
         sticker_count: count,
         sheet_size: size,
-        background: packBackground(background, styleForRow),
+        background,
         padding,
       };
+      console.log("[sheets] save", { style: row.style });
       void supabase
         .from("sheets")
         .insert(row)
-        .then(async ({ error: saveError }) => {
-          if (saveError && missingStyleColumn(saveError)) {
-            console.error("[sheets] save failed", {
-              style: styleForRow,
-              message: saveError.message,
-              code: saveError.code,
-            });
-            const { style: _style, ...withoutStyle } = row;
-            const retry = await supabase.from("sheets").insert(withoutStyle);
-            if (retry.error) {
-              setSaveNote(
-                styleForRow
-                  ? `Couldn't save the ${label ?? styleForRow} sheet. ${retry.error.message}`
-                  : `Couldn't save this sheet. ${retry.error.message}`,
-              );
-              return;
-            }
-            lastSavedRef.current = snapshot;
-            setSaveNote(label ? `Saved the ${label} sheet.` : "Saved to My sheets.");
-            return;
-          }
+        .then(({ error: saveError }) => {
           if (saveError) {
             console.error("[sheets] save failed", {
-              style: styleForRow,
+              style: row.style,
               message: saveError.message,
               code: saveError.code,
             });
             setSaveNote(
-              styleForRow
-                ? `Couldn't save the ${label ?? styleForRow} sheet. ${saveError.message}`
+              row.style
+                ? `Couldn't save the ${label ?? row.style} sheet. ${saveError.message}`
                 : `Couldn't save this sheet. ${saveError.message}`,
             );
             return;
