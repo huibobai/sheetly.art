@@ -156,7 +156,7 @@ export function SheetsList() {
               href={`/?sheet=${sheet.id}`}
               className="block overflow-hidden rounded-2xl border border-border bg-surface transition-colors hover:border-stone-300"
             >
-              <div className="flex aspect-square items-center justify-center bg-stone-50 p-2">
+              <div className="relative aspect-square overflow-hidden bg-stone-50">
                 <SheetThumbnail sheet={sheet} />
               </div>
               <div className="space-y-2 p-4">

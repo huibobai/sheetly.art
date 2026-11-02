@@ -5,16 +5,43 @@ import { sheetItems, type SheetRecord } from "@/lib/sheets";
 import { drawStickerSheet, sheetPixels } from "@/lib/sticker-sheet";
 import { urlWithoutStyle } from "@/lib/sticker-styles";
 
+async function loadBitmap(url: string, signal: AbortSignal) {
+  const response = await fetch(`/api/sheet-image?url=${encodeURIComponent(url)}`, { signal });
+  if (!response.ok) {
+    throw new Error("Could not load a saved photo.");
+  }
+  const blob = await response.blob();
+  if (!blob.size) {
+    throw new Error("The saved photo is empty.");
+  }
+  try {
+    return await createImageBitmap(blob);
+  } catch {
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const image = new Image();
+      image.src = objectUrl;
+      await image.decode();
+      return await createImageBitmap(image);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+}
+
 export function SheetThumbnail({ sheet }: { sheet: SheetRecord }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [failed, setFailed] = useState(false);
   const items = sheetItems(sheet);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const itemKey = items.map((item) => `${item.photoUrl}|${item.imageUrl}|${item.style ?? ""}`).join("\n");
-  const fallbackUrl = urlWithoutStyle(items[0]?.imageUrl || sheet.generated_url || sheet.source_image_url);
+  const fallbackUrl = urlWithoutStyle(items[0]?.imageUrl || sheet.generated_url || sheet.source_image_url || "");
+  const [src, setSrc] = useState(fallbackUrl);
 
   useEffect(() => {
-    if (!items.length) {
-      setFailed(true);
+    const photos = itemsRef.current;
+    const photoUrl = fallbackUrl;
+    setSrc(photoUrl);
+    if (!photos.length || !photoUrl) {
       return;
     }
 
@@ -24,23 +51,21 @@ export function SheetThumbnail({ sheet }: { sheet: SheetRecord }) {
 
     async function render() {
       try {
-        for (const item of items) {
-          const response = await fetch(`/api/sheet-image?url=${encodeURIComponent(item.imageUrl)}`, {
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            throw new Error("Could not load a saved photo.");
-          }
-          const bitmap = await createImageBitmap(await response.blob());
+        for (const item of photos) {
+          const bitmap = await loadBitmap(item.imageUrl, controller.signal);
           if (cancelled) {
             bitmap.close();
             return;
           }
           bitmaps.push(bitmap);
         }
-        const canvas = canvasRef.current;
-        const context = canvas?.getContext("2d");
-        if (!canvas || !context) {
+        if (cancelled || !bitmaps.length) {
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        if (!context) {
           throw new Error("Could not draw the sheet preview.");
         }
         const page = sheetPixels(sheet.sheet_size);
@@ -49,16 +74,23 @@ export function SheetThumbnail({ sheet }: { sheet: SheetRecord }) {
           size: sheet.sheet_size,
           background: sheet.background,
           padding: sheet.padding / 100,
-          scale: 420 / Math.max(page.width, page.height),
+          scale: 480 / Math.max(page.width, page.height),
         });
-        if (!cancelled) {
-          setFailed(false);
-        }
-      } catch {
-        if (cancelled || controller.signal.aborted) {
+        if (cancelled || canvas.width < 2 || canvas.height < 2) {
           return;
         }
-        setFailed(true);
+        const preview = canvas.toDataURL("image/png");
+        if (!cancelled && preview.startsWith("data:image/")) {
+          setSrc(preview);
+        }
+      } catch {
+        if (!cancelled && !controller.signal.aborted) {
+          setSrc(photoUrl);
+        }
+      } finally {
+        for (const bitmap of bitmaps) {
+          bitmap.close();
+        }
       }
     }
 
@@ -66,18 +98,34 @@ export function SheetThumbnail({ sheet }: { sheet: SheetRecord }) {
     return () => {
       cancelled = true;
       controller.abort();
-      for (const bitmap of bitmaps) {
-        bitmap.close();
-      }
     };
-  }, [itemKey, items.length, sheet.background, sheet.padding, sheet.sheet_size, sheet.sticker_count]);
+  }, [itemKey, fallbackUrl, sheet.background, sheet.padding, sheet.sheet_size, sheet.sticker_count]);
 
-  if (failed) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={fallbackUrl} alt="" className="h-full w-full object-contain" />
-    );
+  if (!src) {
+    return <div className="absolute inset-0 bg-stone-200" />;
   }
 
-  return <canvas ref={canvasRef} aria-hidden="true" className="max-h-full max-w-full" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt="Sticker sheet preview"
+      className="absolute inset-0 h-full w-full object-contain p-3"
+      onError={() => {
+        setSrc((current) => {
+          if (!fallbackUrl) {
+            return current;
+          }
+          if (current.startsWith("data:")) {
+            return fallbackUrl;
+          }
+          const proxy = `/api/sheet-image?url=${encodeURIComponent(fallbackUrl)}`;
+          if (current === fallbackUrl) {
+            return proxy;
+          }
+          return current;
+        });
+      }}
+    />
+  );
 }
