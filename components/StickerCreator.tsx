@@ -5,7 +5,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { StickerSheet } from "@/components/StickerSheet";
 import { presetFromRecord, SHEET_COLUMNS, SHEET_COLUMNS_WITHOUT_STYLE, missingStyleColumn, toSheetRecord, type SheetPreset } from "@/lib/sheets";
-import { isStickerStyle, STICKER_STYLES, STYLE_LABELS, type StickerStyle } from "@/lib/sticker-styles";
+import { isStickerStyle, STICKER_STYLES, STYLE_LABELS, styleLabel, type StickerStyle } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/client";
 
 const MAX_PHOTOS = 12;
@@ -27,44 +27,57 @@ function displayUrl(photo: SheetPhoto) {
   return photo.previewUrl;
 }
 
-function StyleSelect({
+function StyleChoices({
   value,
   onChange,
   label,
-  placeholder,
+  photoUrl,
 }: {
   value: string;
   onChange: (value: string) => void;
   label: string;
-  placeholder?: string;
+  photoUrl?: string | null;
 }) {
+  const options: { id: string; name: string; image: string | null }[] = [
+    { id: "photo", name: "Photo", image: photoUrl ?? null },
+    ...STICKER_STYLES.map((id) => ({ id, name: STYLE_LABELS[id], image: `/styles/${id}.jpg` })),
+  ];
+
   return (
-    <label className="block space-y-1">
-      <span className="text-sm font-medium">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm"
-      >
-        {placeholder ? (
-          <option value="" disabled>
-            {placeholder}
-          </option>
-        ) : null}
-        <option value="photo">Photo</option>
-        {STICKER_STYLES.map((id) => (
-          <option key={id} value={id}>
-            {STYLE_LABELS[id]}
-          </option>
-        ))}
-      </select>
-    </label>
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium">{label}</legend>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+        {options.map((option) => {
+          const selected = value === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(option.id)}
+              className={`rounded-xl border p-1.5 text-center ${
+                selected ? "border-accent bg-orange-50 ring-2 ring-orange-100" : "border-border bg-white hover:border-stone-300"
+              }`}
+            >
+              {option.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={option.image} alt="" className="aspect-square w-full rounded-lg bg-stone-50 object-cover" />
+              ) : (
+                <span className="block aspect-square w-full rounded-lg bg-stone-100" />
+              )}
+              <span className="mt-1 block text-xs font-medium">{option.name}</span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
   );
 }
 
 export function StickerCreator({ initialSheetId }: { initialSheetId: string | null }) {
   const { user, loading } = useAuth();
   const [photos, setPhotos] = useState<SheetPhoto[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preset, setPreset] = useState<SheetPreset | null>(null);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
   const inflightRef = useRef(new Set<string>());
@@ -77,6 +90,16 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (photos.length === 0) {
+      setSelectedId(null);
+      return;
+    }
+    if (!photos.some((photo) => photo.id === selectedId)) {
+      setSelectedId(photos[0].id);
+    }
+  }, [photos, selectedId]);
 
   useEffect(() => {
     if (!initialSheetId || loading) {
@@ -256,9 +279,8 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
     );
   }
 
-  const sharedStyle = photos.every((photo) => photo.style === photos[0]?.style)
-    ? photos[0]?.style ?? "photo"
-    : "";
+  const selected = photos.find((photo) => photo.id === selectedId) ?? photos[0] ?? null;
+  const selectedIndex = selected ? photos.findIndex((photo) => photo.id === selected.id) : -1;
   const first = photos[0];
   const firstStyled = first?.style ? first.results[first.style] : null;
   const stylingCount = photos.filter(
@@ -276,7 +298,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
         <h2 className="text-lg font-semibold tracking-tight">Photos</h2>
         <p className="mt-1 text-sm leading-6 text-muted">
-          Upload one photo or several at once. Then pick a style for each, or use the same style for all of them.
+          Upload one photo or several. Click a photo, then pick its style.
         </p>
         <div className="mt-5">
           {photos.length === 0 ? (
@@ -288,54 +310,75 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               onPhotoFailed={failPhoto}
             />
           ) : (
-            <div className="space-y-4">
-              <StyleSelect
-                label="Apply one style to all"
-                value={sharedStyle}
-                placeholder={sharedStyle === "" ? "Mixed styles" : undefined}
-                onChange={applyStyleToAll}
-              />
-              <ul className="space-y-3">
+            <div className="space-y-5">
+              <ul className="grid grid-cols-3 gap-2 sm:grid-cols-5">
                 {photos.map((photo, index) => {
                   const styling = Boolean(
                     photo.style && !photo.uploadFailed && !photo.results[photo.style] && !photo.error,
                   );
+                  const active = photo.id === selected?.id;
                   return (
-                    <li key={photo.id} className="flex flex-col gap-3 rounded-2xl border border-border p-3 sm:flex-row sm:items-center">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={displayUrl(photo)}
-                        alt=""
-                        className="h-16 w-16 shrink-0 rounded-xl bg-stone-50 object-cover"
-                      />
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <StyleSelect
-                          label={`Photo ${index + 1}`}
-                          value={photo.style ?? "photo"}
-                          onChange={(value) => chooseStyle(photo.id, value)}
-                        />
-                        {styling ? (
-                          <p className="text-xs text-muted" role="status">
-                            {photo.storedUrl ? "Styling…" : "Uploading…"}
-                          </p>
-                        ) : null}
-                        {photo.error ? (
-                          <p role="alert" className="text-xs text-red-600">
-                            {photo.error}
-                          </p>
-                        ) : null}
-                      </div>
+                    <li key={photo.id} className="relative">
                       <button
                         type="button"
-                        onClick={() => removePhoto(photo.id)}
-                        className="shrink-0 rounded-xl border border-border px-3 py-2 text-sm font-medium hover:border-stone-300"
+                        aria-pressed={active}
+                        onClick={() => setSelectedId(photo.id)}
+                        className={`w-full rounded-2xl border p-1.5 text-center ${
+                          active
+                            ? "border-accent bg-orange-50 ring-2 ring-orange-100"
+                            : "border-border bg-white hover:border-stone-300"
+                        }`}
                       >
-                        Remove
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={displayUrl(photo)}
+                          alt=""
+                          className="aspect-square w-full rounded-xl bg-stone-50 object-cover"
+                        />
+                        <span className="mt-1 block truncate text-xs font-medium">
+                          {styleLabel(photo.style) ?? "Photo"}
+                        </span>
+                        {styling ? <span className="mt-0.5 block text-[10px] text-muted">Styling…</span> : null}
+                        {photo.error && !styling ? (
+                          <span className="mt-0.5 block text-[10px] text-red-600">Needs attention</span>
+                        ) : null}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove photo ${index + 1}`}
+                        onClick={() => removePhoto(photo.id)}
+                        className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-stone-900 text-xs text-white"
+                      >
+                        ×
                       </button>
                     </li>
                   );
                 })}
               </ul>
+              {selected ? (
+                <div className="space-y-3">
+                  <StyleChoices
+                    label={`Style for photo ${selectedIndex + 1}`}
+                    value={selected.style ?? "photo"}
+                    photoUrl={selected.previewUrl}
+                    onChange={(value) => chooseStyle(selected.id, value)}
+                  />
+                  {photos.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => applyStyleToAll(selected.style ?? "photo")}
+                      className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
+                    >
+                      Apply this style to all photos
+                    </button>
+                  ) : null}
+                  {selected.error ? (
+                    <p role="alert" className="text-sm text-red-600">
+                      {selected.error}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {photos.length < MAX_PHOTOS ? (
                 <PhotoUpload
                   variant="button"
