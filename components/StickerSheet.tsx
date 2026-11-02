@@ -354,10 +354,10 @@ export function StickerSheet({
   const photoCount = artworkUrls.length;
   const sheetNote =
     photoCount <= 1
-      ? "This photo repeats across the sheet. Dashed lines show where to cut."
+      ? "This photo repeats as a die-cut sticker. Dashed lines follow the white edge."
       : photoCount >= count
-        ? "Each photo gets its own cell, in order. Dashed lines show where to cut."
-        : "Photos fill the sheet in order, then repeat. Dashed lines show where to cut.";
+        ? "Each photo is its own die-cut sticker. Dashed lines follow the white edge."
+        : "Photos fill the sheet in order, then repeat. Dashed lines follow the white edge.";
   const summaryParts = [
     `${count} stickers`,
     photoCount > 1 ? `${photoCount} photos` : null,
@@ -455,7 +455,9 @@ export function StickerSheet({
               <label className="block space-y-2">
                 <span className="flex items-center justify-between text-sm font-medium">
                   Border
-                  <span className="font-normal text-muted">{padding === 0 ? "None" : "White edge"}</span>
+                  <span className="font-normal text-muted">
+                    {padding === 0 ? "Thin" : padding >= 22 ? "Wide" : "White edge"}
+                  </span>
                 </span>
                 <input
                   type="range"
