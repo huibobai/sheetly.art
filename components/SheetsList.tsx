@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { GoogleSignInButton } from "@/components/AuthControls";
-import { EmailSignInForm } from "@/components/SignInPrompt";
+import { EmailSignInForm, GoogleSignInButton } from "@/components/SignInPrompt";
 import { SheetThumbnail } from "@/components/SheetThumbnail";
 import { useAuth } from "@/components/AuthProvider";
 import { SHEET_BACKGROUNDS, sheetSizeLabel } from "@/lib/sticker-sheet";

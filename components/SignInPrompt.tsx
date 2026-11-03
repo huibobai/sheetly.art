@@ -1,8 +1,46 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { GoogleSignInButton } from "@/components/AuthControls";
 import { useAuth } from "@/components/AuthProvider";
+
+const EDITOR_SIGN_IN_DESCRIPTION =
+  "To build your preview, your photo is uploaded to our storage. If you pick an AI style, it's also sent to our image partner (fal.ai, which uses Black Forest Labs' FLUX model) to create the sticker. Sign in with Google or email to add more photos and download the sheet.";
+
+export function GoogleSignInButton({ fullWidth = false }: { fullWidth?: boolean }) {
+  const { signInWithGoogle } = useAuth();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function start() {
+    setPending(true);
+    setError(null);
+    const result = await signInWithGoogle();
+    if (result) {
+      setPending(false);
+      setError(result);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => void start()}
+        disabled={pending}
+        className={`rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:opacity-50 ${
+          fullWidth ? "w-full" : ""
+        }`}
+      >
+        {pending ? "Redirecting…" : "Sign in with Google"}
+      </button>
+      {error ? (
+        <p role="alert" className="text-sm text-red-600">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function EmailSignInForm() {
   const { signInWithEmail } = useAuth();
@@ -50,7 +88,7 @@ export function EmailSignInForm() {
       </button>
       {sent ? (
         <p role="status" className="text-sm text-muted">
-          Check your email for a sign-in link. It brings you back to this page.
+          Check your email for a sign-in link. It signs you in and brings you back to the home page.
         </p>
       ) : null}
       {error ? (
@@ -65,15 +103,18 @@ export function EmailSignInForm() {
 export function SignInPrompt({
   open,
   title,
+  description = EDITOR_SIGN_IN_DESCRIPTION,
   onClose,
 }: {
   open: boolean;
   title: string;
+  description?: string;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const titleId = useId();
+  const descriptionId = useId();
   onCloseRef.current = onClose;
 
   useEffect(() => {
@@ -113,6 +154,7 @@ export function SignInPrompt({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         className="w-full max-w-md rounded-3xl border border-border bg-surface p-6 shadow-lg outline-none"
@@ -120,10 +162,8 @@ export function SignInPrompt({
         <h2 id={titleId} className="text-lg font-semibold tracking-tight">
           {title}
         </h2>
-        <p className="mt-2 text-sm leading-6 text-muted">
-          To build your preview, your photo is uploaded to our storage. If you pick an AI style, it&apos;s also sent to
-          our image partner (fal.ai, which uses Black Forest Labs&apos; FLUX model) to create the sticker. Sign in with
-          Google or email to add more photos and download the sheet.
+        <p id={descriptionId} className="mt-2 text-sm leading-6 text-muted">
+          {description}
         </p>
         <div className="mt-5 space-y-4">
           <GoogleSignInButton fullWidth />
