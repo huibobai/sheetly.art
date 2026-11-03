@@ -15,7 +15,7 @@ export function UploadLink() {
       }}
       className="inline-flex w-full cursor-pointer items-center justify-center rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 sm:w-auto"
     >
-      Upload a photo
+      Add a photo
     </button>
   );
 }

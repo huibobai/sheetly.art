@@ -72,3 +72,13 @@ test("messages are friendly and never mention the provider", () => {
     assert.doesNotMatch(message, /fal|balance|billing/i);
   }
 });
+
+test("messages say which limit was hit and when to try again", () => {
+  const minute = quotaMessage({ allowed: false, reason: "minute", retryAfterSeconds: 5 });
+  assert.match(minute, /minute/i);
+  const daily = quotaMessage({ allowed: false, reason: "daily", retryAfterSeconds: 5 });
+  assert.match(daily, /today/i);
+  assert.match(daily, /tomorrow/i);
+  const unavailable = quotaMessage({ allowed: false, reason: "unavailable" });
+  assert.match(unavailable, /later/i);
+});

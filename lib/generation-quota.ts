@@ -52,10 +52,10 @@ export function interpretQuotaResult(data: unknown): QuotaDecision {
 
 export function quotaMessage(decision: Exclude<QuotaDecision, { allowed: true }>): string {
   if (decision.reason === "minute") {
-    return "You're styling photos a little fast. Wait a minute, then try again.";
+    return "That's a lot of styles in one minute. Wait a minute, then try again.";
   }
   if (decision.reason === "daily") {
-    return "You've reached today's limit for AI styles. Try again tomorrow, or use the Photo style.";
+    return "You've used today's AI styles. Try again tomorrow, or use the Photo style for now.";
   }
-  return "AI styles are unavailable right now. Please try again later.";
+  return "AI styles aren't available right now. Please try again later.";
 }

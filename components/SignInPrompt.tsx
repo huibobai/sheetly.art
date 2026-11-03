@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/AuthProvider";
 
 const EDITOR_SIGN_IN_DESCRIPTION =
-  "To build your preview, your photo is uploaded to our storage. If you pick an AI style, it's also sent to our image partner (fal.ai, which uses Black Forest Labs' FLUX model) to create the sticker. Sign in with Google or email to add more photos and download the sheet.";
+  "Your photo is saved in our storage so we can show the preview. If you pick an AI style, that photo is also sent to our image partner, fal.ai, which uses Black Forest Labs' FLUX model, to draw the sticker. Sign in with Google or email to add more photos and download the sheet.";
 
 export function GoogleSignInButton({ fullWidth = false }: { fullWidth?: boolean }) {
   const { signInWithGoogle } = useAuth();
@@ -31,7 +31,7 @@ export function GoogleSignInButton({ fullWidth = false }: { fullWidth?: boolean 
           fullWidth ? "w-full" : ""
         }`}
       >
-        {pending ? "Redirecting…" : "Sign in with Google"}
+        {pending ? "Opening Google…" : "Sign in with Google"}
       </button>
       {error ? (
         <p role="alert" className="text-sm text-red-600">
@@ -84,11 +84,11 @@ export function EmailSignInForm() {
         disabled={pending}
         className="w-full rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:opacity-50"
       >
-        {pending ? "Sending link…" : "Email me a sign-in link"}
+        {pending ? "Sending the link…" : "Send me a sign-in link"}
       </button>
       {sent ? (
         <p role="status" className="text-sm text-muted">
-          Check your email for a sign-in link. It signs you in and brings you back to the home page.
+          Check your inbox for a sign-in link. It signs you in and brings you back to the home page.
         </p>
       ) : null}
       {error ? (

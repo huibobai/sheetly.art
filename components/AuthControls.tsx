@@ -7,7 +7,7 @@ import { SignInPrompt } from "@/components/SignInPrompt";
 import { useAuth } from "@/components/AuthProvider";
 
 const HEADER_SIGN_IN_DESCRIPTION =
-  "Sign in with Google or email to save sheets, add more photos, and download a print-ready file.";
+  "Sign in with Google or email to save your sheets, add more photos, and download a file you can print.";
 
 export function AuthControls() {
   const { user, loading, signOut } = useAuth();
@@ -46,7 +46,7 @@ export function AuthControls() {
       </button>
       {authError ? (
         <p role="alert" className="text-sm text-red-600">
-          That sign-in didn&apos;t work. Try again.
+          That sign-in didn&apos;t work. Please try again.
         </p>
       ) : null}
       <SignInPrompt

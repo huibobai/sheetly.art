@@ -77,11 +77,11 @@ async function loadSheetImage(url: string, signal: AbortSignal) {
     if (signal.aborted) {
       throw error;
     }
-    throw new Error("Could not load the artwork for this sheet.");
+    throw new Error("We couldn't load the artwork for this sheet.");
   }
 
   if (!response.ok) {
-    let detail = "Could not load the artwork for this sheet.";
+    let detail = "We couldn't load the artwork for this sheet.";
     try {
       const payload = (await response.json()) as { error?: string };
       if (payload.error) {
@@ -108,7 +108,7 @@ async function loadSheetImage(url: string, signal: AbortSignal) {
       await image.decode();
       return await createImageBitmap(image);
     } catch {
-      throw new Error("The saved artwork could not be read.");
+      throw new Error("We couldn't read the saved artwork.");
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
@@ -262,7 +262,7 @@ export function StickerSheet({
             return;
           }
           lastSavedRef.current = snapshot;
-          setSaveNote(label ? `Saved the ${label} sheet.` : "Saved to My sheets.");
+          setSaveNote(label ? `Saved the ${label} sheet.` : "Saved. It's in My sheets.");
         });
     }, 800);
 
@@ -274,7 +274,7 @@ export function StickerSheet({
   useEffect(() => {
     if (!artworkUrls.length) {
       if (preset) {
-        setError("This saved sheet is missing its image, so it can't be previewed or downloaded.");
+        setError("This saved sheet is missing its image, so we can't preview or download it.");
         setReady(false);
       }
       return;
@@ -319,7 +319,7 @@ export function StickerSheet({
         const canvas = canvasRef.current;
         const context = canvas?.getContext("2d");
         if (!canvas || !context) {
-          throw new Error("The sheet preview is not on the page yet.");
+          throw new Error("The sheet preview isn't on the page yet.");
         }
 
         drawStickerSheet(context, loaded, {
@@ -341,7 +341,7 @@ export function StickerSheet({
         setError(
           error instanceof Error && error.message
             ? error.message
-            : "Could not build the sticker sheet.",
+            : "We couldn't build the sticker sheet.",
         );
       }
     }
@@ -366,7 +366,7 @@ export function StickerSheet({
     if (!ready || bitmaps.some((bitmap) => !bitmap)) {
       setError(
         imageUrl
-          ? "The sheet is not ready to download yet."
+          ? "The sheet isn't ready to download yet."
           : "This sheet has no artwork to download.",
       );
       return;
@@ -378,7 +378,7 @@ export function StickerSheet({
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
       if (!context) {
-        setError("Could not create the PNG. Open the sheet again and retry the download.");
+        setError("We couldn't create the PNG. Open the sheet again and try the download once more.");
         return;
       }
 
@@ -395,7 +395,7 @@ export function StickerSheet({
         canvas.toBlob(resolve, "image/png");
       });
       if (!blob) {
-        setError("Could not create the PNG. Open the sheet again and retry the download.");
+        setError("We couldn't create the PNG. Open the sheet again and try the download once more.");
         return;
       }
 
@@ -414,10 +414,10 @@ export function StickerSheet({
   const photoCount = artworkUrls.length;
   const sheetNote =
     photoCount <= 1
-      ? "This photo repeats as a die-cut sticker. Dashed lines follow the white edge."
+      ? "This photo repeats as a die-cut sticker. The dashed lines follow the white edge."
       : photoCount >= count
-        ? "Each photo is its own die-cut sticker. Dashed lines follow the white edge."
-        : "Photos fill the sheet in order, then repeat. Dashed lines follow the white edge.";
+        ? "Each photo is its own die-cut sticker. The dashed lines follow the white edge."
+        : "Photos fill the sheet in order, then repeat. The dashed lines follow the white edge.";
   const summaryParts = [
     `${count} stickers`,
     photoCount > 1 ? `${photoCount} photos` : null,
@@ -427,28 +427,28 @@ export function StickerSheet({
     "300 DPI",
   ].filter((part): part is string => Boolean(part));
   const summary = !ready
-    ? "Preparing your sheet…"
+    ? "Putting your sheet together…"
     : pendingStyles > 0
-      ? `Updating ${pendingStyles === 1 ? "1 style" : `${pendingStyles} styles`}…`
+      ? `Styling ${pendingStyles === 1 ? "1 photo" : `${pendingStyles} photos`}…`
       : summaryParts.join(" · ");
 
   return (
     <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
-      <h2 className="text-lg font-semibold tracking-tight">Sticker sheet</h2>
+      <h2 className="text-lg font-semibold tracking-tight">Your sticker sheet</h2>
       <p className="mt-1 text-sm leading-6 text-muted">
-        Choose a size and how many stickers. The preview updates as styles finish.
+        Pick a size and how many stickers you want. The preview updates as each style finishes.
       </p>
       {!imageUrl ? (
         <div className="mt-5 rounded-2xl border border-dashed border-border bg-stone-50 px-6 py-14 text-center">
           <p className="text-sm font-medium">Your preview will show up here</p>
-          <p className="mt-1 text-sm text-muted">Upload a photo to start the sheet.</p>
+          <p className="mt-1 text-sm text-muted">Add a photo to start the sheet.</p>
         </div>
       ) : (
         <div className="mt-5 space-y-5">
           <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
             <div className="space-y-5">
               <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">How many</legend>
+                <legend className="text-sm font-medium">How many stickers</legend>
                 <div className="grid grid-cols-4 gap-2">
                   {SHEET_COUNTS.map((option) => (
                     <button
@@ -557,7 +557,7 @@ export function StickerSheet({
             disabled={Boolean(user) && (loading || !ready || downloading)}
             className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {downloading ? "Preparing print file…" : "Download sticker sheet"}
+            {downloading ? "Getting the print file ready…" : "Download your sheet"}
           </button>
           {error ? (
             <p role="alert" className="text-center text-sm text-red-600">

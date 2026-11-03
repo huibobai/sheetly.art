@@ -41,11 +41,11 @@ function validateFile(file: File) {
   const extension = ACCEPTED_TYPES[file.type] ?? extensionFromName(file.name);
 
   if (!extension || (file.type && !ACCEPTED_TYPES[file.type])) {
-    return "Please choose a JPG, PNG, or WEBP image.";
+    return "Please choose a JPG, PNG, or WEBP photo.";
   }
 
   if (file.size > MAX_FILE_BYTES) {
-    return "This file is too big. Maximum size is 10 MB.";
+    return "That file is over 10 MB. Please choose a smaller one.";
   }
 
   return null;
@@ -215,10 +215,10 @@ export function PhotoUpload({
       const denied = caught instanceof Error && caught.message === "permission";
       setError(
         stage === "compressing"
-          ? "Could not process this image. Please try another file."
+          ? "We couldn't read that image. Please try another file."
           : denied
-            ? "Upload failed. The uploads bucket is not allowing this upload."
-            : "Upload failed. Please try again.",
+            ? "Upload didn't go through. Storage blocked this photo. Please try again."
+            : "Upload didn't go through. Please try again.",
       );
       return false;
     } finally {
@@ -265,7 +265,7 @@ export function PhotoUpload({
 
   const statusLabel =
     phase === "compressing"
-      ? "Compressing…"
+      ? "Getting your photo ready…"
       : phase === "uploading"
         ? `Uploading… ${progress}%`
         : onPhoto
@@ -274,12 +274,12 @@ export function PhotoUpload({
 
   const statusHint =
     phase === "compressing"
-      ? "Resizing your photo to 2000px."
+      ? "Resizing it to 2000px."
       : phase === "uploading"
-        ? "Sending the compressed image."
+        ? "Sending it up now."
         : onPhoto
-          ? (idleHint ?? "One photo or several. PNG, JPG, or WEBP.")
-          : "PNG, JPG, or WEBP";
+          ? (idleHint ?? "One photo or a few. JPG, PNG, or WEBP.")
+          : "JPG, PNG, or WEBP";
 
   if (variant === "button") {
     const unavailable = disabled || remainingExtras <= 0;
@@ -317,10 +317,10 @@ export function PhotoUpload({
     <section className="space-y-3">
       {showHeading ? (
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">Upload a photo</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Add a photo</h2>
           <p className="mt-1 text-sm text-muted">
-            Drag and drop an image, or click to browse. JPG, PNG, or WEBP up to 10 MB.
-            Photos are resized before upload.
+            Drag a photo here, or click to browse. JPG, PNG, or WEBP, up to 10 MB.
+            We resize it before upload.
           </p>
         </div>
       ) : null}

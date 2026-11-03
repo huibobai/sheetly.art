@@ -8,11 +8,15 @@ import { supabaseUrl } from "@/lib/supabase/env";
 
 export const maxDuration = 60;
 
+// Dublin, next to Supabase. Next.js 16 still forwards this export and warns that it is deprecated.
+// vercel.json also sets this route's region, which is what Vercel uses for Node.js functions.
+export const preferredRegion = "dub1";
+
 /** fal fetches the photo through this signed URL, so it only needs to live for one generation. */
 const SIGNED_URL_SECONDS = 600;
 
-const GENERIC_ERROR = "Could not style this photo. Please try again.";
-const UNAVAILABLE_ERROR = "AI styles are unavailable right now. Please try again later, or use the Photo style.";
+const GENERIC_ERROR = "We couldn't style this photo. Please try again.";
+const UNAVAILABLE_ERROR = "AI styles aren't available right now. Please try again later, or use the Photo style.";
 
 type GenerateBody = {
   imageUrl?: unknown;
@@ -68,7 +72,7 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as GenerateBody;
   } catch {
-    return json({ error: "Choose an uploaded photo and a sticker style." }, 400);
+    return json({ error: "Pick an uploaded photo and a sticker style." }, 400);
   }
 
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
@@ -77,7 +81,7 @@ export async function POST(request: Request) {
   // 2. Only this project's storage: the caller's own private upload, or a legacy public upload.
   const source = imageUrl ? generateSourceFor(imageUrl, supabaseUrl(), user.id) : null;
   if (!source || !isStickerStyle(style)) {
-    return json({ error: "Choose an uploaded photo and a sticker style." }, 400);
+    return json({ error: "Pick an uploaded photo and a sticker style." }, 400);
   }
 
   const falKey = process.env.FAL_KEY;
@@ -86,18 +90,24 @@ export async function POST(request: Request) {
     return json({ error: UNAVAILABLE_ERROR }, 503);
   }
 
-  // 3. Short-lived URL fal can fetch (signed before the quota so a missing photo costs nothing).
-  const falImageUrl = await urlForFal(supabase, source);
+  // 3. Sign a short-lived URL and check the quota together. The URL is not saved.
+  // The quota function runs once. If it says no, we stop before fal.
+  // A missing photo is still a 400, checked before the quota result.
+  // Because these run together, a missing photo can use one quota slot. It does not call fal.
+  const limits = quotaLimitsFromEnv(process.env);
+  const [falImageUrl, quotaResult] = await Promise.all([
+    urlForFal(supabase, source),
+    supabase.rpc("consume_generation_quota", {
+      p_daily_limit: limits.perDay,
+      p_minute_limit: limits.perMinute,
+    }),
+  ]);
   if (!falImageUrl) {
-    return json({ error: "That photo could not be found. Remove it and add it again." }, 400);
+    return json({ error: "We can't find that photo. Remove it and add it again." }, 400);
   }
 
   // 4. Per-user quota (rolling minute + rolling 24 h), counted in the database.
-  const limits = quotaLimitsFromEnv(process.env);
-  const { data: quotaData, error: quotaError } = await supabase.rpc("consume_generation_quota", {
-    p_daily_limit: limits.perDay,
-    p_minute_limit: limits.perMinute,
-  });
+  const { data: quotaData, error: quotaError } = quotaResult;
   if (quotaError) {
     console.error("generate: quota check failed", quotaError.message);
   }
