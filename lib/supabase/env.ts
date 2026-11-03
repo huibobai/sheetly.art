@@ -3,6 +3,9 @@
  * - NEXT_PUBLIC_SUPABASE_URL
  * - NEXT_PUBLIC_SUPABASE_ANON_KEY
  * - FAL_KEY (server only, read in app/api/generate/route.ts)
+ * Optional, server only (see lib/generation-quota.ts):
+ * - GENERATE_DAILY_LIMIT (AI styles per user per rolling 24 h, default 20)
+ * - GENERATE_PER_MINUTE_LIMIT (AI styles per user per rolling minute, default 3)
  */
 
 export function supabaseUrl() {
