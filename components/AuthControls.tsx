@@ -5,21 +5,28 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { SignInPrompt } from "@/components/SignInPrompt";
 import { useAuth } from "@/components/AuthProvider";
-
-const HEADER_SIGN_IN_DESCRIPTION =
-  "Sign in with Google or email to save your sheets, add more photos, and download a file you can print.";
+import { isPermanentUser } from "@/lib/auth-user";
+import type { SignInPurpose } from "@/lib/sign-in-flow";
 
 export function AuthControls() {
   const { user, loading, signOut } = useAuth();
   const searchParams = useSearchParams();
-  const authError = searchParams.get("auth") === "error";
+  const auth = searchParams.get("auth");
+  const authError = auth === "error";
   const [signInOpen, setSignInOpen] = useState(false);
+  const [purpose, setPurpose] = useState<SignInPurpose>("header");
+  const permanent = isPermanentUser(user);
+
+  function openSignIn(next: SignInPurpose) {
+    setPurpose(next);
+    setSignInOpen(true);
+  }
 
   if (loading) {
     return <p className="text-sm text-muted">…</p>;
   }
 
-  if (user) {
+  if (permanent && user) {
     return (
       <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
         <p className="max-w-48 truncate text-sm text-muted">{user.email}</p>
@@ -35,26 +42,34 @@ export function AuthControls() {
 
   return (
     <div className="ml-auto flex flex-col items-end gap-2">
-      <button
-        type="button"
-        onClick={() => setSignInOpen(true)}
-        aria-haspopup="dialog"
-        aria-expanded={signInOpen}
-        className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
-      >
-        Sign in
-      </button>
+      <div className="flex items-center gap-4">
+        <button type="button" onClick={() => openSignIn("save")} className="text-sm font-medium">
+          My sheets
+        </button>
+        <button
+          type="button"
+          onClick={() => openSignIn("header")}
+          aria-haspopup="dialog"
+          aria-expanded={signInOpen}
+          className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
+        >
+          Sign in
+        </button>
+      </div>
       {authError ? (
         <p role="alert" className="text-sm text-red-600">
           That sign-in didn&apos;t work. Please try again.
         </p>
       ) : null}
-      <SignInPrompt
-        open={signInOpen}
-        title="Sign in"
-        description={HEADER_SIGN_IN_DESCRIPTION}
-        onClose={() => setSignInOpen(false)}
-      />
+      {signInOpen ? (
+        <SignInPrompt
+          key={purpose}
+          open
+          purpose={purpose}
+          onClose={() => setSignInOpen(false)}
+          onSignedIn={() => setSignInOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

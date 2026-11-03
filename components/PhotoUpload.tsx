@@ -113,6 +113,7 @@ export function PhotoUpload({
   onPhoto,
   onPhotoStored,
   onPhotoFailed,
+  prepareSession,
   upload = true,
   showHeading = true,
   variant = "dropzone",
@@ -129,8 +130,13 @@ export function PhotoUpload({
   onExtra?: (sticker: UploadedExtra) => void;
   onPhoto?: (photo: { id: string; previewUrl: string }) => void;
   onPhotoStored?: (id: string, url: string) => void;
-  onPhotoFailed?: (id: string) => void;
-  /** When false (guests), the photo is only compressed and previewed in this browser; nothing is uploaded. */
+  onPhotoFailed?: (id: string, message?: string) => void;
+  /**
+   * Called before an upload. Guests use it to open an anonymous session the
+   * first time a photo is added. Return false to keep the preview on this device.
+   */
+  prepareSession?: () => Promise<boolean>;
+  /** When false, the photo is only compressed and previewed in this browser. */
   upload?: boolean;
   showHeading?: boolean;
   variant?: "dropzone" | "button";
@@ -182,11 +188,19 @@ export function PhotoUpload({
       if (!upload) {
         return true;
       }
+      if (prepareSession) {
+        const ready = await prepareSession();
+        if (!ready) {
+          onPhotoFailed?.(photoId, "session");
+          return true;
+        }
+      }
       const {
         data: { session },
       } = await createClient().auth.getSession();
       if (!session) {
-        // Signed out meanwhile: keep the local preview, do not upload.
+        // No session to attach the private upload to. Keep the local preview.
+        onPhotoFailed?.(photoId, "session");
         return true;
       }
       stage = "uploading";
@@ -206,7 +220,7 @@ export function PhotoUpload({
       return true;
     } catch (caught) {
       if (onPhoto && stage !== "compressing") {
-        onPhotoFailed?.(photoId);
+        onPhotoFailed?.(photoId, "upload");
         return true;
       }
       if (asExtra && stage !== "compressing") {
@@ -226,7 +240,7 @@ export function PhotoUpload({
       setPhase("idle");
       setProgress(0);
     }
-  }, [onExtra, onPhoto, onPhotoFailed, onPhotoStored, onPreview, onUploaded, upload]);
+  }, [onExtra, onPhoto, onPhotoFailed, onPhotoStored, onPreview, onUploaded, prepareSession, upload]);
 
   const handleFiles = useCallback(async (list: FileList | undefined) => {
     const files = list ? [...list] : [];

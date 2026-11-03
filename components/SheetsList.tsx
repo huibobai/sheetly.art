@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { EmailSignInForm, GoogleSignInButton } from "@/components/SignInPrompt";
+import { SignInPrompt } from "@/components/SignInPrompt";
 import { SheetThumbnail } from "@/components/SheetThumbnail";
 import { useAuth } from "@/components/AuthProvider";
+import { isPermanentUser } from "@/lib/auth-user";
 import { SHEET_BACKGROUNDS, sheetSizeLabel } from "@/lib/sticker-sheet";
 import {
   missingItemsColumn,
@@ -34,12 +35,14 @@ export function SheetsList() {
   const { user, loading } = useAuth();
   const [sheets, setSheets] = useState<SheetRecord[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [signInOpen, setSignInOpen] = useState(false);
+  const permanent = isPermanentUser(user);
 
   useEffect(() => {
     if (loading) {
       return;
     }
-    if (!user) {
+    if (!permanent) {
       setStatus("ready");
       return;
     }
@@ -93,20 +96,29 @@ export function SheetsList() {
     return () => {
       cancelled = true;
     };
-  }, [loading, user]);
+  }, [loading, permanent]);
 
-  if (loading || (user && status === "loading")) {
+  if (loading || (permanent && status === "loading")) {
     return <p className="text-sm text-muted">Loading your sheets…</p>;
   }
 
-  if (!user) {
+  if (!permanent) {
     return (
       <div className="max-w-lg space-y-4 rounded-3xl border border-border bg-surface p-6">
         <p className="text-sm leading-6 text-muted">
-          Sign in to see sheets you have saved, add more than one photo, and download a print-ready file.
+          Sign in to see sheets you have saved. You can still make a sheet on the home page before you sign in.
         </p>
-        <GoogleSignInButton />
-        <EmailSignInForm />
+        <button
+          type="button"
+          onClick={() => setSignInOpen(true)}
+          aria-haspopup="dialog"
+          className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
+        >
+          Sign in
+        </button>
+        {signInOpen ? (
+          <SignInPrompt open purpose="save" onClose={() => setSignInOpen(false)} onSignedIn={() => setSignInOpen(false)} />
+        ) : null}
       </div>
     );
   }

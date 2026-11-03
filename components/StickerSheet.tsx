@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { isPermanentUser } from "@/lib/auth-user";
+import { SHEET_CUT_LINE } from "@/lib/copy";
 import {
   missingItemsColumn,
   missingStyleColumn,
@@ -172,6 +174,9 @@ export function StickerSheet({
   preset,
   onRequireSignIn,
   sheetPhotos,
+  autoDownload = false,
+  onAutoDownloadDone,
+  onSettings,
 }: {
   artworks: string[];
   storedPhotoUrl: string | null;
@@ -181,8 +186,14 @@ export function StickerSheet({
   preset: SheetPreset | null;
   onRequireSignIn?: () => void;
   sheetPhotos: { storedUrl: string | null; style: string | null; displayUrl: string }[];
+  autoDownload?: boolean;
+  onAutoDownloadDone?: () => void;
+  onSettings?: (settings: { count: SheetCount; size: SheetSize; background: SheetBackground; padding: number }) => void;
 }) {
   const { user, loading } = useAuth();
+  const permanent = isPermanentUser(user);
+  const downloadRef = useRef<() => Promise<void>>(async () => undefined);
+  const autoStartedRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pinnedUrlsRef = useRef<string[]>([]);
   const previewDebounceRef = useRef(createDebouncedCallback(PREVIEW_DEBOUNCE_MS));
@@ -197,6 +208,23 @@ export function StickerSheet({
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const lastSavedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    onSettings?.({ count, size, background, padding });
+  }, [count, size, background, padding, onSettings]);
+
+  useEffect(() => {
+    downloadRef.current = download;
+  });
+
+  useEffect(() => {
+    if (!autoDownload || autoStartedRef.current || loading || !permanent || !ready) {
+      return;
+    }
+    autoStartedRef.current = true;
+    onAutoDownloadDone?.();
+    void downloadRef.current();
+  }, [autoDownload, loading, permanent, ready, onAutoDownloadDone]);
 
   useEffect(() => {
     if (!preset) {
@@ -251,7 +279,7 @@ export function StickerSheet({
 
   useEffect(() => {
     const items = savedItemsRef.current;
-    if (!user || !ready || !items || !savedKey || savedKey === lastSavedRef.current || savedKey === loadedKey) {
+    if (!permanent || !ready || !items || !savedKey || savedKey === lastSavedRef.current || savedKey === loadedKey) {
       return;
     }
 
@@ -328,7 +356,7 @@ export function StickerSheet({
     }, 800);
 
     return () => window.clearTimeout(timer);
-  }, [ready, user, savedKey, loadedKey]);
+  }, [ready, permanent, savedKey, loadedKey]);
   const backgroundLabel = SHEET_BACKGROUNDS.find((item) => item.id === background)?.label ?? "White";
   const sizeLabel = sheetSizeLabel(size);
 
@@ -492,7 +520,12 @@ export function StickerSheet({
   }, [artworkKey, preview, background, preset]);
 
   async function download() {
-    if (!user) {
+    if (!isPermanentUser(user)) {
+      onRequireSignIn?.();
+      return;
+    }
+    const gate = await fetch("/api/download-auth", { method: "POST" });
+    if (!gate.ok) {
       onRequireSignIn?.();
       return;
     }
@@ -553,12 +586,7 @@ export function StickerSheet({
   }
 
   const photoCount = artworkUrls.length;
-  const sheetNote =
-    photoCount <= 1
-      ? "This photo repeats as a die-cut sticker. The dashed lines follow the white edge."
-      : photoCount >= count
-        ? "Each photo is its own die-cut sticker. The dashed lines follow the white edge."
-        : "Photos fill the sheet in order, then repeat. The dashed lines follow the white edge.";
+  const sheetNote = SHEET_CUT_LINE;
   const summaryParts = [
     `${count} stickers`,
     photoCount > 1 ? `${photoCount} photos` : null,
@@ -698,7 +726,7 @@ export function StickerSheet({
           <button
             type="button"
             onClick={() => void download()}
-            disabled={Boolean(user) && (loading || !ready || downloading)}
+            disabled={downloading || (permanent && (loading || !ready))}
             className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {downloading ? "Getting the print file ready…" : "Download your sheet"}
@@ -712,7 +740,7 @@ export function StickerSheet({
               <p className="text-sm text-muted" role="status">
                 {summary}
               </p>
-              {user && saveNote ? (
+              {permanent && saveNote ? (
                 <p
                   role={saveNote.startsWith("Couldn't") ? "alert" : "status"}
                   className={`text-sm ${saveNote.startsWith("Couldn't") ? "text-red-600" : "text-muted"}`}
@@ -720,8 +748,8 @@ export function StickerSheet({
                   {saveNote}
                 </p>
               ) : null}
-              {!loading && !user ? (
-                <p className="text-sm text-muted">Sign in to download this sheet or add more photos.</p>
+              {!loading && !permanent ? (
+                <p className="text-sm text-muted">Sign in when you download. You won&apos;t have to upload these photos again.</p>
               ) : null}
             </div>
           )}

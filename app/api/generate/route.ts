@@ -1,6 +1,7 @@
 import { fal } from "@fal-ai/client";
 import { connection } from "next/server";
-import { interpretQuotaResult, quotaLimitsFromEnv, quotaMessage } from "@/lib/generation-quota";
+import { resolveGuestIp } from "@/lib/client-ip";
+import { isGuestDailyCap, interpretQuotaResult, quotaLimitsFromEnv, quotaMessage, quotaRpcArgs, GUEST_LIMIT_CODE } from "@/lib/generation-quota";
 import { generateSourceFor, isFalMediaHost, type StorageRef } from "@/lib/image-source";
 import { isStickerStyle, STYLE_PROMPTS } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/server";
@@ -59,7 +60,9 @@ async function urlForFal(
 export async function POST(request: Request) {
   await connection();
 
-  // 1. Signed-in users only. Guests can preview with the Photo style, which never calls this route.
+  // 1. A session is required. Anonymous guests count: they are authenticated users
+  // with is_anonymous true, and the quota function gives them the guest caps.
+  // A visitor with no session at all still has to sign in.
   const supabase = await createClient();
   const {
     data: { user },
@@ -67,6 +70,7 @@ export async function POST(request: Request) {
   if (!user) {
     return json({ error: "Sign in to use AI styles.", code: "auth_required" }, 401);
   }
+  const anonymous = user.is_anonymous === true;
 
   let body: GenerateBody;
   try {
@@ -95,18 +99,20 @@ export async function POST(request: Request) {
   // A missing photo is still a 400, checked before the quota result.
   // Because these run together, a missing photo can use one quota slot. It does not call fal.
   const limits = quotaLimitsFromEnv(process.env);
+  // Signed-in calls pass a null IP. The SQL function also ignores IP caps unless
+  // the JWT says is_anonymous, so a guest cannot be given the signed-in daily cap
+  // by omitting the guest argument, and a missing IP fails closed for guests.
+  const guestIp = anonymous ? resolveGuestIp(request.headers, process.env.NODE_ENV) : null;
   const [falImageUrl, quotaResult] = await Promise.all([
     urlForFal(supabase, source),
-    supabase.rpc("consume_generation_quota", {
-      p_daily_limit: limits.perDay,
-      p_minute_limit: limits.perMinute,
-    }),
+    supabase.rpc("consume_generation_quota", quotaRpcArgs(anonymous, limits, guestIp)),
   ]);
   if (!falImageUrl) {
     return json({ error: "We can't find that photo. Remove it and add it again." }, 400);
   }
 
-  // 4. Per-user quota (rolling minute + rolling 24 h), counted in the database.
+  // 4. Quota (rolling minute + rolling 24 h), counted in the database.
+  // Guests also hit per-IP caps. Signed-in limits are the same numbers as before.
   const { data: quotaData, error: quotaError } = quotaResult;
   if (quotaError) {
     console.error("generate: quota check failed", quotaError.message);
@@ -116,8 +122,13 @@ export async function POST(request: Request) {
     if (decision.reason === "unavailable") {
       return json({ error: UNAVAILABLE_ERROR }, 503);
     }
+    const code = isGuestDailyCap(decision.reason)
+      ? GUEST_LIMIT_CODE
+      : decision.reason === "daily"
+        ? "daily_limit"
+        : "rate_limited";
     return json(
-      { error: quotaMessage(decision), code: decision.reason === "minute" ? "rate_limited" : "daily_limit" },
+      { error: quotaMessage(decision), code },
       429,
       { "Retry-After": String(decision.retryAfterSeconds) },
     );
