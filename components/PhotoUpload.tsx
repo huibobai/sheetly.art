@@ -2,11 +2,13 @@
 
 import { useCallback, useRef, useState } from "react";
 import { compressImage } from "@/lib/compress-image";
+import { buildUploadPath, PRIVATE_UPLOADS_BUCKET, privateUploadRef } from "@/lib/image-source";
 import { createClient } from "@/lib/supabase/client";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const BUCKET = "uploads";
+// Private bucket; objects are stored under the signed-in user's id (see the storage policies migration).
+const BUCKET = PRIVATE_UPLOADS_BUCKET;
 
 const ACCEPTED_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -53,6 +55,7 @@ function uploadCompressedImage(
   path: string,
   body: Blob,
   contentType: string,
+  accessToken: string,
   onProgress: (percent: number) => void,
 ) {
   const supabaseUrlValue = supabaseUrl().replace(/\/$/, "");
@@ -61,7 +64,8 @@ function uploadCompressedImage(
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${supabaseUrlValue}/storage/v1/object/${BUCKET}/${path}`);
-    xhr.setRequestHeader("Authorization", `Bearer ${supabaseKey}`);
+    // The user's own JWT, so the storage policy can check the `{auth.uid()}/` folder.
+    xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
     xhr.setRequestHeader("apikey", supabaseKey);
     xhr.setRequestHeader("Content-Type", contentType);
     xhr.setRequestHeader("cache-control", "max-age=3600");
@@ -109,6 +113,7 @@ export function PhotoUpload({
   onPhoto,
   onPhotoStored,
   onPhotoFailed,
+  upload = true,
   showHeading = true,
   variant = "dropzone",
   buttonLabel = "Add photos",
@@ -125,6 +130,8 @@ export function PhotoUpload({
   onPhoto?: (photo: { id: string; previewUrl: string }) => void;
   onPhotoStored?: (id: string, url: string) => void;
   onPhotoFailed?: (id: string) => void;
+  /** When false (guests), the photo is only compressed and previewed in this browser; nothing is uploaded. */
+  upload?: boolean;
   showHeading?: boolean;
   variant?: "dropzone" | "button";
   buttonLabel?: string;
@@ -172,16 +179,27 @@ export function PhotoUpload({
       } else {
         onPreview?.(previewUrl);
       }
+      if (!upload) {
+        return true;
+      }
+      const {
+        data: { session },
+      } = await createClient().auth.getSession();
+      if (!session) {
+        // Signed out meanwhile: keep the local preview, do not upload.
+        return true;
+      }
       stage = "uploading";
       setPhase("uploading");
-      const path = `${crypto.randomUUID()}.${compressed.extension}`;
-      await uploadCompressedImage(path, compressed.blob, compressed.contentType, setProgress);
+      const path = buildUploadPath(session.user.id, compressed.extension, crypto.randomUUID());
+      await uploadCompressedImage(path, compressed.blob, compressed.contentType, session.access_token, setProgress);
 
-      const { data } = createClient().storage.from(BUCKET).getPublicUrl(path);
+      // Not a public URL: a durable reference that /api/sheet-image and /api/generate resolve server-side.
+      const storedRef = privateUploadRef(supabaseUrl(), path);
       if (onPhoto) {
-        onPhotoStored?.(photoId, data.publicUrl);
+        onPhotoStored?.(photoId, storedRef);
       } else if (!asExtra) {
-        const photo = { name: file.name, url: data.publicUrl };
+        const photo = { name: file.name, url: storedRef };
         setUploaded(photo);
         onUploaded?.(photo);
       }
@@ -208,7 +226,7 @@ export function PhotoUpload({
       setPhase("idle");
       setProgress(0);
     }
-  }, [onExtra, onPhoto, onPhotoFailed, onPhotoStored, onPreview, onUploaded]);
+  }, [onExtra, onPhoto, onPhotoFailed, onPhotoStored, onPreview, onUploaded, upload]);
 
   const handleFiles = useCallback(async (list: FileList | undefined) => {
     const files = list ? [...list] : [];

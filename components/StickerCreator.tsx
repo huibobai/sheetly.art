@@ -6,6 +6,7 @@ import { PhotoUpload } from "@/components/PhotoUpload";
 import { PHOTO_UPLOAD_INPUT_ID } from "@/components/UploadLink";
 import { SignInPrompt } from "@/components/SignInPrompt";
 import { StickerSheet } from "@/components/StickerSheet";
+import { displaySrc } from "@/lib/image-source";
 import {
   missingItemsColumn,
   missingStyleColumn,
@@ -29,8 +30,39 @@ type SheetPhoto = {
   style: StickerStyle | null;
   results: Partial<Record<StickerStyle, string>>;
   uploadFailed: boolean;
+  /** Added while signed out: kept in this browser only, never uploaded, so AI styles are unavailable for it. */
+  localOnly: boolean;
   error: string | null;
 };
+
+const LOCAL_ONLY_AI_ERROR = "This photo stayed in your browser. Remove it and add it again to use AI styles.";
+
+async function requestStyledImage(
+  imageUrl: string,
+  style: StickerStyle,
+): Promise<{ imageUrl?: string; error?: string; needsSignIn?: boolean }> {
+  const response = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageUrl, style }),
+  });
+  let payload: { imageUrl?: string; error?: string } = {};
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch {
+    payload = {};
+  }
+  if (response.ok && payload.imageUrl) {
+    return { imageUrl: payload.imageUrl };
+  }
+  if (response.status === 401) {
+    return { error: "Sign in to use AI styles.", needsSignIn: true };
+  }
+  if (response.status === 429) {
+    return { error: payload.error ?? "You've used AI styles a lot just now. Please wait and try again." };
+  }
+  return { error: payload.error ?? "Could not style this photo. Please try again." };
+}
 
 function displayUrl(photo: SheetPhoto) {
   if (photo.style && photo.results[photo.style]) {
@@ -92,7 +124,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preset, setPreset] = useState<SheetPreset | null>(null);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
-  const [signInPrompt, setSignInPrompt] = useState<"photos" | "download" | null>(null);
+  const [signInPrompt, setSignInPrompt] = useState<"photos" | "download" | "ai" | null>(null);
   const inflightRef = useRef(new Set<string>());
   const failedRef = useRef(new Set<string>());
   const mountedRef = useRef(true);
@@ -203,6 +235,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               style,
               results: style && item.imageUrl !== item.photoUrl ? { [style]: item.imageUrl } : {},
               uploadFailed: false,
+              localOnly: false,
               error: null,
             };
           }),
@@ -228,27 +261,26 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       const storedUrl = photo.storedUrl;
       void (async () => {
         try {
-          const response = await fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ imageUrl: storedUrl, style }),
-          });
-          const payload = (await response.json()) as { imageUrl?: string; error?: string };
-          if (!response.ok || !payload.imageUrl) {
-            throw new Error(payload.error ?? "Could not style this photo.");
+          const payload = await requestStyledImage(storedUrl, style);
+          if (!payload.imageUrl) {
+            if (payload.needsSignIn && mountedRef.current) {
+              setSignInPrompt("ai");
+            }
+            throw new Error(payload.error);
           }
+          const styledUrl = payload.imageUrl;
           if (!mountedRef.current) {
             return;
           }
           try {
-            localStorage.setItem(`sheetly-style:${payload.imageUrl.split("#")[0]}`, style);
+            localStorage.setItem(`sheetly-style:${styledUrl.split("#")[0]}`, style);
           } catch {
             // The sheet still shows the styled image in this session.
           }
           setPhotos((current) =>
             current.map((item) =>
               item.id === photo.id
-                ? { ...item, results: { ...item.results, [style]: payload.imageUrl }, error: null }
+                ? { ...item, results: { ...item.results, [style]: styledUrl }, error: null }
                 : item,
             ),
           );
@@ -281,6 +313,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               style: null,
               results: {},
               uploadFailed: false,
+              localOnly: !user,
               error: null,
             },
           ],
@@ -311,20 +344,38 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
 
   function chooseStyle(id: string, value: string) {
     const style = isStickerStyle(value) ? value : null;
+    if (style && guest) {
+      // AI styles send the photo to fal.ai, so they need an account; guests keep the Photo style locally.
+      setSignInPrompt("ai");
+      return;
+    }
     if (style) {
       failedRef.current.delete(`${id}:${style}`);
     }
     setPhotos((current) =>
-      current.map((photo) =>
-        photo.id === id ? { ...photo, style, error: photo.uploadFailed ? photo.error : null } : photo,
-      ),
+      current.map((photo) => {
+        if (photo.id !== id) {
+          return photo;
+        }
+        if (style && photo.localOnly) {
+          return { ...photo, error: LOCAL_ONLY_AI_ERROR };
+        }
+        return { ...photo, style, error: photo.uploadFailed ? photo.error : null };
+      }),
     );
   }
 
   function applyStyleToAll(value: string) {
     const style = isStickerStyle(value) ? value : null;
+    if (style && guest) {
+      setSignInPrompt("ai");
+      return;
+    }
     setPhotos((current) =>
       current.map((photo) => {
+        if (style && photo.localOnly) {
+          return { ...photo, error: LOCAL_ONLY_AI_ERROR };
+        }
         if (style) {
           failedRef.current.delete(`${photo.id}:${style}`);
         }
@@ -357,7 +408,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
         <h2 className="text-lg font-semibold tracking-tight">Photos</h2>
         <p className="mt-1 text-sm leading-6 text-muted">
           {guest
-            ? "Upload one photo and pick a style to preview your sheet. Sign in to download it or add more photos."
+            ? "Add one photo to preview your sheet. It stays in this browser until you sign in. Sign in to use AI styles, add more photos, or download it."
             : "Upload one photo or several. Click a photo, then pick its style."}
         </p>
         <div className="mt-5">
@@ -369,6 +420,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               idleHint={guest ? "One photo to try. PNG, JPG, or WEBP." : undefined}
               onLimit={guest ? () => setSignInPrompt("photos") : undefined}
               inputId={PHOTO_UPLOAD_INPUT_ID}
+              upload={Boolean(user)}
               onPhoto={addPhoto}
               onPhotoStored={storePhoto}
               onPhotoFailed={failPhoto}
@@ -398,7 +450,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={displayUrl(photo)}
+                          src={displaySrc(displayUrl(photo))}
                           alt=""
                           className="aspect-square w-full rounded-xl bg-stone-50 object-cover"
                         />
@@ -427,7 +479,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                   <StyleChoices
                     label={`Style for photo ${selectedIndex + 1}`}
                     value={selected.style ?? "photo"}
-                    photoUrl={selected.previewUrl}
+                    photoUrl={displaySrc(selected.previewUrl)}
                     onChange={(value) => chooseStyle(selected.id, value)}
                   />
                   {photos.length > 1 ? (
@@ -470,6 +522,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                   buttonLabel="Add photos"
                   remainingExtras={MAX_PHOTOS - photos.length}
                   inputId={PHOTO_UPLOAD_INPUT_ID}
+                  upload={Boolean(user)}
                   onPhoto={addPhoto}
                   onPhotoStored={storePhoto}
                   onPhotoFailed={failPhoto}
@@ -500,7 +553,13 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
 
       <SignInPrompt
         open={signInPrompt !== null}
-        title={signInPrompt === "download" ? "Sign in to download your sheet" : "Sign in to add more photos"}
+        title={
+          signInPrompt === "download"
+            ? "Sign in to download your sheet"
+            : signInPrompt === "ai"
+              ? "Sign in to use AI styles"
+              : "Sign in to add more photos"
+        }
         onClose={() => setSignInPrompt(null)}
       />
     </div>

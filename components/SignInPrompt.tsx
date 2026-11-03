@@ -121,8 +121,9 @@ export function SignInPrompt({
           {title}
         </h2>
         <p className="mt-2 text-sm leading-6 text-muted">
-          Your photo and preview stay on this page. Sign in with Google or email to add more photos and download the
-          sheet.
+          To build your preview, your photo is uploaded to our storage. If you pick an AI style, it&apos;s also sent to
+          our image partner (fal.ai, which uses Black Forest Labs&apos; FLUX model) to create the sticker. Sign in with
+          Google or email to add more photos and download the sheet.
         </p>
         <div className="mt-5 space-y-4">
           <GoogleSignInButton fullWidth />
