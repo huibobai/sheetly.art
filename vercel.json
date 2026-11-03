@@ -3,6 +3,9 @@
   "functions": {
     "app/api/generate/route.ts": {
       "regions": ["dub1"]
+    },
+    "app/api/sheet-image/route.ts": {
+      "regions": ["dub1"]
     }
   }
 }

@@ -7,6 +7,10 @@ import { supabaseUrl } from "@/lib/supabase/env";
 const MAX_BYTES = 20 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 
+// Dublin, next to Supabase. Next.js 16 still forwards this export and warns that it is deprecated.
+// vercel.json also sets this route's region, which is what Vercel uses for Node.js functions.
+export const preferredRegion = "dub1";
+
 function imageResponse(bytes: Uint8Array | ArrayBuffer, contentType: string) {
   return new Response(bytes as BodyInit, {
     headers: {

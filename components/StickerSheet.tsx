@@ -12,16 +12,26 @@ import {
 } from "@/lib/sheets";
 import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
 import {
-  drawStickerSheet,
+  peekSheetBitmap,
+  pinSheetBitmap,
+  rememberSheetBitmap,
+  unpinSheetBitmap,
+} from "@/lib/sheet-bitmaps";
+import {
+  createDebouncedCallback,
+  drawStickerSheetAsync,
+  PREVIEW_DEBOUNCE_MS,
   pngBlobWithDpi,
   previewScale,
   SHEET_BACKGROUNDS,
   SHEET_COUNTS,
   SHEET_SIZES,
   sheetSizeLabel,
+  waitForNextPaint,
+  warmPrintDieCuts,
+  yieldToBrowser,
   type SheetBackground,
   type SheetCount,
-  type SheetImage,
   type SheetSize,
 } from "@/lib/sticker-sheet";
 import { createClient } from "@/lib/supabase/client";
@@ -115,6 +125,44 @@ async function loadSheetImage(url: string, signal: AbortSignal) {
   }
 }
 
+function waitForIdle(signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(() => finish(), { timeout: 1200 });
+      signal.addEventListener(
+        "abort",
+        () => {
+          cancelIdleCallback(id);
+          finish();
+        },
+        { once: true },
+      );
+      return;
+    }
+    const id = window.setTimeout(finish, 200);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(id);
+        finish();
+      },
+      { once: true },
+    );
+  });
+}
+
 export function StickerSheet({
   artworks,
   storedPhotoUrl,
@@ -136,11 +184,14 @@ export function StickerSheet({
 }) {
   const { user, loading } = useAuth();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const bitmapCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
+  const pinnedUrlsRef = useRef<string[]>([]);
+  const previewDebounceRef = useRef(createDebouncedCallback(PREVIEW_DEBOUNCE_MS));
   const [count, setCount] = useState<SheetCount>(preset?.count ?? 9);
   const [size, setSize] = useState<SheetSize>(preset?.size ?? "a4");
   const [background, setBackground] = useState<SheetBackground>(preset?.background ?? "white");
   const [padding, setPadding] = useState(preset?.padding ?? 12);
+  const [preview, setPreview] = useState({ count, size, padding });
+  const [painted, setPainted] = useState({ count, size, padding });
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
@@ -155,15 +206,25 @@ export function StickerSheet({
     setSize(preset.size);
     setBackground(preset.background);
     setPadding(preset.padding);
+    setPreview({ count: preset.count, size: preset.size, padding: preset.padding });
   }, [preset]);
 
   useEffect(() => {
-    const cache = bitmapCacheRef.current;
+    if (preview.count === count && preview.size === size && preview.padding === padding) {
+      return;
+    }
+    const gate = previewDebounceRef.current;
+    gate.schedule(() => setPreview({ count, size, padding }));
+    return () => gate.cancel();
+  }, [count, size, padding, preview]);
+
+  useEffect(() => {
+    const pinned = pinnedUrlsRef;
     return () => {
-      for (const bitmap of cache.values()) {
-        bitmap.close();
+      for (const url of pinned.current) {
+        unpinSheetBitmap(url);
       }
-      cache.clear();
+      pinned.current = [];
     };
   }, []);
 
@@ -281,39 +342,97 @@ export function StickerSheet({
     }
 
     const urls = artworkUrls;
+    const previewCount = preview.count;
+    const previewSize = preview.size;
+    const previewPadding = preview.padding;
     const controller = new AbortController();
     let cancelled = false;
 
+    function adopt(bitmaps: ImageBitmap[]) {
+      const canonical = bitmaps.map((bitmap, index) => rememberSheetBitmap(urls[index], bitmap));
+      const next = [...new Set(urls)];
+      const previous = new Set(pinnedUrlsRef.current);
+      for (const url of next) {
+        if (!previous.has(url)) {
+          pinSheetBitmap(url);
+        }
+      }
+      for (const url of pinnedUrlsRef.current) {
+        if (!next.includes(url)) {
+          unpinSheetBitmap(url);
+        }
+      }
+      pinnedUrlsRef.current = next;
+      return canonical;
+    }
+
     async function render() {
+      const fresh: ImageBitmap[] = [];
       try {
         setError(null);
-        const loaded: SheetImage[] = [];
-        for (const url of urls) {
-          let bitmap = bitmapCacheRef.current.get(url);
-          if (!bitmap) {
+        const settled = await Promise.allSettled(
+          urls.map(async (url) => {
+            const cached = peekSheetBitmap(url);
+            if (cached) {
+              return { bitmap: cached, fresh: false };
+            }
             try {
-              bitmap = await loadSheetImage(url, controller.signal);
+              const bitmap = await loadSheetImage(url, controller.signal);
+              fresh.push(bitmap);
+              return { bitmap, fresh: true };
             } catch (error) {
               if (cancelled || controller.signal.aborted) {
-                return;
+                throw error;
               }
-              bitmap = await loadSheetImage(url, controller.signal);
+              const bitmap = await loadSheetImage(url, controller.signal);
+              fresh.push(bitmap);
+              return { bitmap, fresh: true };
             }
-            if (cancelled) {
+          }),
+        );
+        if (cancelled || controller.signal.aborted) {
+          for (const bitmap of fresh) {
+            if (!urls.some((url) => peekSheetBitmap(url) === bitmap)) {
               bitmap.close();
-              return;
             }
-            bitmapCacheRef.current.set(url, bitmap);
           }
-          loaded.push(bitmap);
+          return;
+        }
+        const rejected = settled.find((item) => item.status === "rejected");
+        if (rejected && rejected.status === "rejected") {
+          for (const bitmap of fresh) {
+            if (!urls.some((url) => peekSheetBitmap(url) === bitmap)) {
+              bitmap.close();
+            }
+          }
+          throw rejected.reason;
+        }
+        const loaded: ImageBitmap[] = [];
+        for (const item of settled) {
+          if (item.status === "fulfilled") {
+            loaded.push(item.value.bitmap);
+          }
+        }
+        const artwork = adopt(loaded);
+
+        const offscreen = document.createElement("canvas");
+        const offscreenContext = offscreen.getContext("2d");
+        if (!offscreenContext) {
+          throw new Error("The sheet preview isn't on the page yet.");
         }
 
-        const keep = new Set(urls);
-        for (const [url, bitmap] of bitmapCacheRef.current) {
-          if (!keep.has(url)) {
-            bitmap.close();
-            bitmapCacheRef.current.delete(url);
-          }
+        await drawStickerSheetAsync(offscreenContext, artwork, {
+          count: previewCount,
+          size: previewSize,
+          background,
+          padding: previewPadding / 100,
+          scale: previewScale(previewSize),
+        }, {
+          signal: controller.signal,
+          afterSticker: () => yieldToBrowser(),
+        });
+        if (cancelled || controller.signal.aborted) {
+          return;
         }
 
         const canvas = canvasRef.current;
@@ -321,20 +440,35 @@ export function StickerSheet({
         if (!canvas || !context) {
           throw new Error("The sheet preview isn't on the page yet.");
         }
+        canvas.width = offscreen.width;
+        canvas.height = offscreen.height;
+        context.drawImage(offscreen, 0, 0);
+        setReady(true);
+        setError(null);
+        setPainted({ count: previewCount, size: previewSize, padding: previewPadding });
 
-        drawStickerSheet(context, loaded, {
-          count,
-          size,
-          background,
-          padding: padding / 100,
-          scale: previewScale(size),
-        });
-        if (!cancelled) {
-          setReady(true);
-          setError(null);
-        }
+        void (async () => {
+          await waitForIdle(controller.signal);
+          if (cancelled || controller.signal.aborted) {
+            return;
+          }
+          try {
+            await warmPrintDieCuts(artwork, {
+              count: previewCount,
+              size: previewSize,
+              padding: previewPadding / 100,
+            }, {
+              signal: controller.signal,
+              afterSticker: () => waitForIdle(controller.signal),
+            });
+          } catch (error) {
+            if (!cancelled && !controller.signal.aborted && !(error instanceof Error && error.name === "AbortError")) {
+              console.error("[sheet] print preview", error);
+            }
+          }
+        })();
       } catch (error) {
-        if (cancelled || controller.signal.aborted) {
+        if (cancelled || controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
           return;
         }
         setReady(false);
@@ -353,8 +487,9 @@ export function StickerSheet({
       controller.abort();
     };
     // artworkKey is the joined artwork URL list, so the preview reloads when a design is added or removed.
+    // Count, size, and border are debounced through `preview` so the slider can move without a rebuild per tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artworkKey, count, size, background, padding, preset]);
+  }, [artworkKey, preview, background, preset]);
 
   async function download() {
     if (!user) {
@@ -362,7 +497,7 @@ export function StickerSheet({
       return;
     }
 
-    const bitmaps = artworkUrls.map((url) => bitmapCacheRef.current.get(url));
+    const bitmaps = artworkUrls.map((url) => peekSheetBitmap(url));
     if (!ready || bitmaps.some((bitmap) => !bitmap)) {
       setError(
         imageUrl
@@ -374,6 +509,7 @@ export function StickerSheet({
 
     setDownloading(true);
     setError(null);
+    await waitForNextPaint();
     try {
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
@@ -382,13 +518,18 @@ export function StickerSheet({
         return;
       }
 
-      drawStickerSheet(context, bitmaps.filter((bitmap): bitmap is ImageBitmap => Boolean(bitmap)), {
-        count,
-        size,
-        background,
-        padding: padding / 100,
-        scale: 1,
-      });
+      await drawStickerSheetAsync(
+        context,
+        bitmaps.filter((bitmap): bitmap is ImageBitmap => Boolean(bitmap)),
+        {
+          count,
+          size,
+          background,
+          padding: padding / 100,
+          scale: 1,
+        },
+        { afterSticker: () => yieldToBrowser() },
+      );
       console.log("[sheet] download canvas", canvas.width, canvas.height);
 
       const blob = await new Promise<Blob | null>((resolve) => {
@@ -426,11 +567,14 @@ export function StickerSheet({
     photoCount === 1 && styleForRow ? styleLabel(styleForRow) : null,
     "300 DPI",
   ].filter((part): part is string => Boolean(part));
+  const controlsPending = painted.count !== count || painted.size !== size || painted.padding !== padding;
   const summary = !ready
     ? "Putting your sheet together…"
-    : pendingStyles > 0
-      ? `Styling ${pendingStyles === 1 ? "1 photo" : `${pendingStyles} photos`}…`
-      : summaryParts.join(" · ");
+    : controlsPending
+      ? "Updating the preview…"
+      : pendingStyles > 0
+        ? `Styling ${pendingStyles === 1 ? "1 photo" : `${pendingStyles} photos`}…`
+        : summaryParts.join(" · ");
 
   return (
     <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
