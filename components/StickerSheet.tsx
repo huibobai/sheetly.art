@@ -1,4 +1,5 @@
 "use client";
+import { MakingProgress } from "@/components/MakingProgress";
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
@@ -605,10 +606,10 @@ export function StickerSheet({
         : summaryParts.join(" · ");
 
   return (
-    <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
-      <h2 className="text-lg font-semibold tracking-tight">Your sticker sheet</h2>
+    <section className="sticker-panel p-5 sm:p-7">
+      <h2 className="font-display text-xl font-bold tracking-tight"><span className="step-dot">2</span> Your sticker sheet</h2>
       <p className="mt-1 text-sm leading-6 text-muted">
-        Pick a size and how many stickers you want. The preview updates as each style finishes.
+        Pick a size and how many. Your sheet shows up right away and gets its new look the moment it&apos;s ready.
       </p>
       {!imageUrl ? (
         <div className="mt-5 rounded-2xl border border-dashed border-border bg-stone-50 px-6 py-14 text-center">
@@ -630,7 +631,7 @@ export function StickerSheet({
                       onClick={() => setCount(option)}
                       className={`rounded-xl border px-3 py-2 text-sm font-medium ${
                         count === option
-                          ? "border-accent bg-orange-50 text-accent"
+                          ? "border-accent bg-accent-soft text-accent"
                           : "border-border bg-white hover:border-stone-300"
                       }`}
                     >
@@ -651,7 +652,7 @@ export function StickerSheet({
                       onClick={() => setSize(option.id)}
                       className={`rounded-xl border px-3 py-2 text-sm font-medium ${
                         size === option.id
-                          ? "border-accent bg-orange-50 text-accent"
+                          ? "border-accent bg-accent-soft text-accent"
                           : "border-border bg-white hover:border-stone-300"
                       }`}
                     >
@@ -701,14 +702,14 @@ export function StickerSheet({
                   aria-valuenow={padding}
                   aria-label="Sticker border"
                   onChange={(event) => setPadding(Number(event.target.value))}
-                  className="w-full accent-orange-600"
+                  className="w-full accent-[var(--accent)]"
                 />
               </label>
             </div>
 
             <div className="space-y-3">
               <div
-                className={`mx-auto overflow-hidden rounded-2xl border border-border ${
+                className={`relative mx-auto overflow-hidden rounded-2xl border border-border ${
                   size === "square" ? "max-w-lg" : "max-w-sm"
                 } ${background === "transparent" ? "sheet-checker" : "bg-white"}`}
               >
@@ -718,6 +719,7 @@ export function StickerSheet({
                   aria-label={`${count} stickers on a ${sizeLabel} sheet`}
                   className="h-auto w-full"
                 />
+                {pendingStyles > 0 ? <MakingProgress count={pendingStyles} variant="overlay" /> : null}
               </div>
               <p className="text-center text-sm text-muted">{sheetNote}</p>
             </div>
@@ -727,9 +729,9 @@ export function StickerSheet({
             type="button"
             onClick={() => void download()}
             disabled={downloading || (permanent && (loading || !ready))}
-            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {downloading ? "Getting the print file ready…" : "Download your sheet"}
+            {downloading ? "Getting the print file ready…" : "Download my sheet"}
           </button>
           {error ? (
             <p role="alert" className="text-center text-sm text-red-600">
@@ -749,7 +751,7 @@ export function StickerSheet({
                 </p>
               ) : null}
               {!loading && !permanent ? (
-                <p className="text-sm text-muted">Sign in when you download. You won&apos;t have to upload these photos again.</p>
+                <p className="text-sm text-muted">Free to try. We only ask you to sign in when you download, and your photos stay put.</p>
               ) : null}
             </div>
           )}

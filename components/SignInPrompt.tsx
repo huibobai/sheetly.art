@@ -285,7 +285,7 @@ export function SignInPrompt({
             <button
               type="submit"
               disabled={pending}
-              className="w-full rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+              className="w-full rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong disabled:opacity-50"
             >
               {pending ? "Sending the code…" : "Email me a code"}
             </button>
@@ -335,7 +335,7 @@ export function SignInPrompt({
             <button
               type="submit"
               disabled={pending || !isCompleteOtp(code)}
-              className="w-full rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+              className="w-full rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong disabled:opacity-50"
             >
               {pending ? "Checking the code…" : "Verify and continue"}
             </button>

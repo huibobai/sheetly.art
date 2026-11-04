@@ -354,7 +354,7 @@ export function PhotoUpload({
         }}
         className={`relative flex min-h-56 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:min-h-72 ${
           isDragging
-            ? "border-accent bg-orange-50"
+            ? "border-accent bg-accent-soft"
             : "border-border bg-surface hover:border-stone-300 hover:bg-stone-50"
         } ${isBusy ? "cursor-wait" : ""}`}
       >
@@ -371,7 +371,7 @@ export function PhotoUpload({
           className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
         />
 
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-accent">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent">
           <svg
             viewBox="0 0 24 24"
             fill="none"
