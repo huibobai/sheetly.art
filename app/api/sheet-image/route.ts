@@ -7,6 +7,10 @@ import { supabaseUrl } from "@/lib/supabase/env";
 const MAX_BYTES = 20 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15_000;
 
+// Dublin, next to Supabase. Next.js 16 still forwards this export and warns that it is deprecated.
+// vercel.json also sets this route's region, which is what Vercel uses for Node.js functions.
+export const preferredRegion = "dub1";
+
 function imageResponse(bytes: Uint8Array | ArrayBuffer, contentType: string) {
   return new Response(bytes as BodyInit, {
     headers: {
@@ -23,7 +27,9 @@ function baseContentType(value: string | null | undefined) {
 
 /**
  * Same-origin image loader for the sheet canvas (avoids CORS taint) and for private uploads.
- * Signed-in users only: guests' photos stay in the browser as blob: URLs and never need this route.
+ * Any session can call it, including an anonymous guest. Private objects are still
+ * downloaded with that session, so storage policies only allow the owner's folder.
+ * Downloading the print file is a separate check and requires a permanent user.
  */
 export async function GET(request: Request) {
   await connection();

@@ -3,6 +3,18 @@
   "functions": {
     "app/api/generate/route.ts": {
       "regions": ["dub1"]
+    },
+    "app/api/sheet-image/route.ts": {
+      "regions": ["dub1"]
+    },
+    "app/api/download-auth/route.ts": {
+      "regions": ["dub1"]
+    },
+    "app/api/guest-handoff/route.ts": {
+      "regions": ["dub1"]
+    },
+    "app/api/guest-migrate/route.ts": {
+      "regions": ["dub1"]
     }
   }
 }

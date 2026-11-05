@@ -13,9 +13,9 @@ export function UploadLink() {
           input.click();
         }
       }}
-      className="inline-flex w-full cursor-pointer items-center justify-center rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 sm:w-auto"
+      className="inline-flex w-full cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-accent px-7 py-3.5 text-base font-bold text-white shadow-[3px_3px_0_var(--foreground)] transition-transform hover:-translate-y-0.5 hover:bg-accent-strong sm:w-auto"
     >
-      Add a photo
+      Add a photo ✂️
     </button>
   );
 }
