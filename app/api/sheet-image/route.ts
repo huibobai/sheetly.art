@@ -27,7 +27,9 @@ function baseContentType(value: string | null | undefined) {
 
 /**
  * Same-origin image loader for the sheet canvas (avoids CORS taint) and for private uploads.
- * Signed-in users only: guests' photos stay in the browser as blob: URLs and never need this route.
+ * Any session can call it, including an anonymous guest. Private objects are still
+ * downloaded with that session, so storage policies only allow the owner's folder.
+ * Downloading the print file is a separate check and requires a permanent user.
  */
 export async function GET(request: Request) {
   await connection();
