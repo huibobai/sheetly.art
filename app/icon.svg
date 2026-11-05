@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="t"><title id="t">sheetly.art</title>
+<rect x="6" y="6" width="50" height="54" rx="9" fill="#1d1a3a" opacity=".18" transform="translate(2 2)"/>
+<path d="M12 4h30l14 14v35a7 7 0 0 1-7 7H12a7 7 0 0 1-7-7V11a7 7 0 0 1 7-7z" fill="#fff" stroke="#1d1a3a" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="20" cy="22" r="8" fill="#ff5c8a" stroke="#fff" stroke-width="3"/>
+<path d="M36.5 30.5l3 6 6.6.9-4.8 4.6 1.2 6.5-6-3.1-5.9 3.1 1.1-6.5-4.8-4.6 6.6-.9z" fill="#ffc93c" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>
+<rect x="12" y="38" width="15" height="13" rx="4" fill="#2ec4b6" stroke="#fff" stroke-width="3" transform="rotate(-8 19 44)"/>
+<path d="M42 4v9a5 5 0 0 0 5 5h9z" fill="#ffd6e2" stroke="#1d1a3a" stroke-width="3" stroke-linejoin="round"/>
+</svg>

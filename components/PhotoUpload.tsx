@@ -2,11 +2,13 @@
 
 import { useCallback, useRef, useState } from "react";
 import { compressImage } from "@/lib/compress-image";
+import { buildUploadPath, PRIVATE_UPLOADS_BUCKET, privateUploadRef } from "@/lib/image-source";
 import { createClient } from "@/lib/supabase/client";
 import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const BUCKET = "uploads";
+// Private bucket; objects are stored under the signed-in user's id (see the storage policies migration).
+const BUCKET = PRIVATE_UPLOADS_BUCKET;
 
 const ACCEPTED_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -39,11 +41,11 @@ function validateFile(file: File) {
   const extension = ACCEPTED_TYPES[file.type] ?? extensionFromName(file.name);
 
   if (!extension || (file.type && !ACCEPTED_TYPES[file.type])) {
-    return "Please choose a JPG, PNG, or WEBP image.";
+    return "Please choose a JPG, PNG, or WEBP photo.";
   }
 
   if (file.size > MAX_FILE_BYTES) {
-    return "This file is too big. Maximum size is 10 MB.";
+    return "That file is over 10 MB. Please choose a smaller one.";
   }
 
   return null;
@@ -53,6 +55,7 @@ function uploadCompressedImage(
   path: string,
   body: Blob,
   contentType: string,
+  accessToken: string,
   onProgress: (percent: number) => void,
 ) {
   const supabaseUrlValue = supabaseUrl().replace(/\/$/, "");
@@ -61,7 +64,8 @@ function uploadCompressedImage(
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${supabaseUrlValue}/storage/v1/object/${BUCKET}/${path}`);
-    xhr.setRequestHeader("Authorization", `Bearer ${supabaseKey}`);
+    // The user's own JWT, so the storage policy can check the `{auth.uid()}/` folder.
+    xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
     xhr.setRequestHeader("apikey", supabaseKey);
     xhr.setRequestHeader("Content-Type", contentType);
     xhr.setRequestHeader("cache-control", "max-age=3600");
@@ -109,6 +113,8 @@ export function PhotoUpload({
   onPhoto,
   onPhotoStored,
   onPhotoFailed,
+  prepareSession,
+  upload = true,
   showHeading = true,
   variant = "dropzone",
   buttonLabel = "Add photos",
@@ -124,7 +130,14 @@ export function PhotoUpload({
   onExtra?: (sticker: UploadedExtra) => void;
   onPhoto?: (photo: { id: string; previewUrl: string }) => void;
   onPhotoStored?: (id: string, url: string) => void;
-  onPhotoFailed?: (id: string) => void;
+  onPhotoFailed?: (id: string, message?: string) => void;
+  /**
+   * Called before an upload. Guests use it to open an anonymous session the
+   * first time a photo is added. Return false to keep the preview on this device.
+   */
+  prepareSession?: () => Promise<boolean>;
+  /** When false, the photo is only compressed and previewed in this browser. */
+  upload?: boolean;
   showHeading?: boolean;
   variant?: "dropzone" | "button";
   buttonLabel?: string;
@@ -172,23 +185,42 @@ export function PhotoUpload({
       } else {
         onPreview?.(previewUrl);
       }
+      if (!upload) {
+        return true;
+      }
+      if (prepareSession) {
+        const ready = await prepareSession();
+        if (!ready) {
+          onPhotoFailed?.(photoId, "session");
+          return true;
+        }
+      }
+      const {
+        data: { session },
+      } = await createClient().auth.getSession();
+      if (!session) {
+        // No session to attach the private upload to. Keep the local preview.
+        onPhotoFailed?.(photoId, "session");
+        return true;
+      }
       stage = "uploading";
       setPhase("uploading");
-      const path = `${crypto.randomUUID()}.${compressed.extension}`;
-      await uploadCompressedImage(path, compressed.blob, compressed.contentType, setProgress);
+      const path = buildUploadPath(session.user.id, compressed.extension, crypto.randomUUID());
+      await uploadCompressedImage(path, compressed.blob, compressed.contentType, session.access_token, setProgress);
 
-      const { data } = createClient().storage.from(BUCKET).getPublicUrl(path);
+      // Not a public URL: a durable reference that /api/sheet-image and /api/generate resolve server-side.
+      const storedRef = privateUploadRef(supabaseUrl(), path);
       if (onPhoto) {
-        onPhotoStored?.(photoId, data.publicUrl);
+        onPhotoStored?.(photoId, storedRef);
       } else if (!asExtra) {
-        const photo = { name: file.name, url: data.publicUrl };
+        const photo = { name: file.name, url: storedRef };
         setUploaded(photo);
         onUploaded?.(photo);
       }
       return true;
     } catch (caught) {
       if (onPhoto && stage !== "compressing") {
-        onPhotoFailed?.(photoId);
+        onPhotoFailed?.(photoId, "upload");
         return true;
       }
       if (asExtra && stage !== "compressing") {
@@ -197,10 +229,10 @@ export function PhotoUpload({
       const denied = caught instanceof Error && caught.message === "permission";
       setError(
         stage === "compressing"
-          ? "Could not process this image. Please try another file."
+          ? "We couldn't read that image. Please try another file."
           : denied
-            ? "Upload failed. The uploads bucket is not allowing this upload."
-            : "Upload failed. Please try again.",
+            ? "Upload didn't go through. Storage blocked this photo. Please try again."
+            : "Upload didn't go through. Please try again.",
       );
       return false;
     } finally {
@@ -208,7 +240,7 @@ export function PhotoUpload({
       setPhase("idle");
       setProgress(0);
     }
-  }, [onExtra, onPhoto, onPhotoFailed, onPhotoStored, onPreview, onUploaded]);
+  }, [onExtra, onPhoto, onPhotoFailed, onPhotoStored, onPreview, onUploaded, prepareSession, upload]);
 
   const handleFiles = useCallback(async (list: FileList | undefined) => {
     const files = list ? [...list] : [];
@@ -247,7 +279,7 @@ export function PhotoUpload({
 
   const statusLabel =
     phase === "compressing"
-      ? "Compressing…"
+      ? "Getting your photo ready…"
       : phase === "uploading"
         ? `Uploading… ${progress}%`
         : onPhoto
@@ -256,12 +288,12 @@ export function PhotoUpload({
 
   const statusHint =
     phase === "compressing"
-      ? "Resizing your photo to 2000px."
+      ? "Resizing it to 2000px."
       : phase === "uploading"
-        ? "Sending the compressed image."
+        ? "Sending it up now."
         : onPhoto
-          ? (idleHint ?? "One photo or several. PNG, JPG, or WEBP.")
-          : "PNG, JPG, or WEBP";
+          ? (idleHint ?? "One photo or a few. JPG, PNG, or WEBP.")
+          : "JPG, PNG, or WEBP";
 
   if (variant === "button") {
     const unavailable = disabled || remainingExtras <= 0;
@@ -299,10 +331,10 @@ export function PhotoUpload({
     <section className="space-y-3">
       {showHeading ? (
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">Upload a photo</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Add a photo</h2>
           <p className="mt-1 text-sm text-muted">
-            Drag and drop an image, or click to browse. JPG, PNG, or WEBP up to 10 MB.
-            Photos are resized before upload.
+            Drag a photo here, or click to browse. JPG, PNG, or WEBP, up to 10 MB.
+            We resize it before upload.
           </p>
         </div>
       ) : null}
@@ -322,7 +354,7 @@ export function PhotoUpload({
         }}
         className={`relative flex min-h-56 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:min-h-72 ${
           isDragging
-            ? "border-accent bg-orange-50"
+            ? "border-accent bg-accent-soft"
             : "border-border bg-surface hover:border-stone-300 hover:bg-stone-50"
         } ${isBusy ? "cursor-wait" : ""}`}
       >
@@ -339,7 +371,7 @@ export function PhotoUpload({
           className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
         />
 
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-orange-50 text-accent">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent">
           <svg
             viewBox="0 0 24 24"
             fill="none"
