@@ -36,6 +36,84 @@ const PAGE_MARGIN_MM = 8;
 const STICKER_GAP_MM = 3.5;
 const CUT_GAP_MM = 0.45;
 
+/** Preview die-cuts stay small. Print die-cuts used to use the full slot, which upscales a 1024px photo. */
+export const PREVIEW_WORK_LIMIT = 460;
+/**
+ * A die-cut is drawn inside a white border, so the photo never needs the whole work canvas.
+ * 75% of the source's long edge keeps a 1024px image from being stretched before the per-pixel passes.
+ */
+export const SOURCE_WORK_FRACTION = 0.75;
+export const PREVIEW_DEBOUNCE_MS = 200;
+
+export function cappedWorkSize(input: {
+  slotLong: number;
+  sourceMaxEdge: number;
+  scale: number;
+  previewLimit?: number;
+  sourceFraction?: number;
+}) {
+  const previewLimit = input.previewLimit ?? PREVIEW_WORK_LIMIT;
+  const sourceFraction = input.sourceFraction ?? SOURCE_WORK_FRACTION;
+  const sourceCap = Math.max(1, input.sourceMaxEdge) * sourceFraction;
+  const slot = Math.max(0, input.slotLong);
+  const limited = input.scale < 1 ? Math.min(slot, previewLimit, sourceCap) : Math.min(slot, sourceCap);
+  return Math.max(48, Math.round(limited));
+}
+
+/** Expensive subject mask, shared by every border width and sheet background. */
+export function cutoutCacheKey(workSize: number) {
+  return String(workSize);
+}
+
+/** Painted sprite, including the white border. Background is not part of the key. */
+export function spriteCacheKey(workSize: number, borderPx: number, cutGapPx: number) {
+  return `${workSize}:${borderPx.toFixed(2)}:${cutGapPx.toFixed(2)}`;
+}
+
+export function createDebouncedCallback(waitMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+  const schedule = (callback: () => void) => {
+    cancel();
+    timer = setTimeout(() => {
+      timer = undefined;
+      callback();
+    }, waitMs);
+  };
+  return { schedule, cancel };
+}
+
+/**
+ * The animation callback runs before paint, so work started there still blocks the frame.
+ * Waiting for the following frame lets "Getting the print file ready…" show up first.
+ */
+export function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame !== "function") {
+      setTimeout(resolve, 16);
+      return;
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+export function yieldToBrowser() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
 export type ExtraSticker = {
   id: string;
   previewUrl: string;
@@ -137,6 +215,77 @@ type StickerPlacement = {
 };
 
 const dieCutCache = new WeakMap<SheetImage, Map<string, DieCutSprite>>();
+
+type ImageRel = { x: number; y: number; w: number; h: number };
+
+type DrawPlacement = {
+  scale: number;
+  originX: number;
+  originY: number;
+  drawWidth: number;
+  drawHeight: number;
+};
+
+type NativeCutout = {
+  kind: "native";
+  source: ImageData;
+  mask: Uint8Array;
+  placement: DrawPlacement;
+  rel: ImageRel;
+};
+
+type RoundedCutout = { kind: "rounded" };
+
+type SubjectCutout = NativeCutout | RoundedCutout;
+
+type SubjectFrame = {
+  aspect: number;
+  rounded: boolean;
+  rel: ImageRel;
+};
+
+const cutoutCache = new WeakMap<SheetImage, Map<string, SubjectCutout>>();
+
+type BuildStats = {
+  probeMasks: number;
+  cutoutMasks: number;
+  cutoutHits: number;
+  spriteHits: number;
+  paints: number;
+};
+
+const buildStats: BuildStats = {
+  probeMasks: 0,
+  cutoutMasks: 0,
+  cutoutHits: 0,
+  spriteHits: 0,
+  paints: 0,
+};
+
+export function sheetBuildStats() {
+  return { ...buildStats };
+}
+
+export function resetSheetBuildStats() {
+  buildStats.probeMasks = 0;
+  buildStats.cutoutMasks = 0;
+  buildStats.cutoutHits = 0;
+  buildStats.spriteHits = 0;
+  buildStats.paints = 0;
+}
+
+export type SheetBuildControl = {
+  signal?: AbortSignal;
+  afterSticker?: () => void | Promise<void>;
+};
+
+function throwIfCancelled(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    const error = new Error("The sheet build was cancelled.");
+    error.name = "AbortError";
+    throw error;
+  }
+}
 
 function sheetImages(image: SheetImage | readonly SheetImage[]) {
   const images = Array.isArray(image) ? image : [image];
@@ -538,10 +687,10 @@ function maskBounds(mask: Uint8Array, width: number, height: number) {
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1, count };
 }
 
-const aspectCache = new WeakMap<SheetImage, number>();
+const frameCache = new WeakMap<SheetImage, SubjectFrame>();
 
-function subjectAspect(image: SheetImage) {
-  const cached = aspectCache.get(image);
+function subjectFrame(image: SheetImage): SubjectFrame {
+  const cached = frameCache.get(image);
   if (cached) {
     return cached;
   }
@@ -550,23 +699,124 @@ function subjectAspect(image: SheetImage) {
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext("2d", { willReadFrequently: true });
+  const fallback: SubjectFrame = { aspect: 1, rounded: true, rel: { x: 0, y: 0, w: 1, h: 1 } };
   if (!context) {
-    return 1;
+    frameCache.set(image, fallback);
+    return fallback;
   }
   const scale = Math.min(size / image.width, size / image.height);
-  context.drawImage(
-    image,
-    (size - image.width * scale) / 2,
-    (size - image.height * scale) / 2,
-    image.width * scale,
-    image.height * scale,
-  );
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const originX = (size - drawWidth) / 2;
+  const originY = (size - drawHeight) / 2;
+  context.drawImage(image, originX, originY, drawWidth, drawHeight);
   const pixels = context.getImageData(0, 0, size, size);
+  buildStats.probeMasks += 1;
   const mask = subjectMask(pixels.data, size, size);
   const bounds = maskBounds(mask, size, size);
-  const aspect = bounds && bounds.height > 0 ? bounds.width / bounds.height : 1;
-  aspectCache.set(image, aspect);
-  return aspect;
+  const ratio = bounds ? bounds.count / (size * size) : 0;
+  const rounded =
+    !bounds ||
+    ratio < 0.035 ||
+    backgroundRemains(mask, size, originX, originY, drawWidth, drawHeight);
+  const frame: SubjectFrame = !bounds
+    ? fallback
+    : {
+        aspect: bounds.height > 0 ? bounds.width / bounds.height : 1,
+        rounded,
+        rel: {
+          x: (bounds.x - originX) / drawWidth,
+          y: (bounds.y - originY) / drawHeight,
+          w: bounds.width / drawWidth,
+          h: bounds.height / drawHeight,
+        },
+      };
+  frameCache.set(image, frame);
+  return frame;
+}
+
+function subjectAspect(image: SheetImage) {
+  return subjectFrame(image).aspect;
+}
+
+function clampAspect(value: number) {
+  return Math.min(1.8, Math.max(0.55, value));
+}
+
+function placementFor(image: SheetImage, rel: ImageRel, workSize: number, content: number): DrawPlacement {
+  const containedScale = Math.min(content / image.width, content / image.height);
+  const subjectLong = Math.max(rel.w * image.width, rel.h * image.height);
+  const containedSubjectLong = subjectLong * containedScale;
+  const scaleUp = containedSubjectLong > 0 && containedSubjectLong < content * 0.94;
+  const scale = scaleUp ? content / subjectLong : containedScale;
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  if (!scaleUp) {
+    return {
+      scale,
+      originX: (workSize - drawWidth) / 2,
+      originY: (workSize - drawHeight) / 2,
+      drawWidth,
+      drawHeight,
+    };
+  }
+  const centerX = (rel.x + rel.w / 2) * image.width;
+  const centerY = (rel.y + rel.h / 2) * image.height;
+  return {
+    scale,
+    originX: workSize / 2 - centerX * scale,
+    originY: workSize / 2 - centerY * scale,
+    drawWidth,
+    drawHeight,
+  };
+}
+
+function samePlacement(a: DrawPlacement, b: DrawPlacement) {
+  return (
+    Math.abs(a.originX - b.originX) < 0.2 &&
+    Math.abs(a.originY - b.originY) < 0.2 &&
+    Math.abs(a.drawWidth - b.drawWidth) < 0.2 &&
+    Math.abs(a.drawHeight - b.drawHeight) < 0.2
+  );
+}
+
+function drawPlacement(image: SheetImage, placement: DrawPlacement, workSize: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = workSize;
+  canvas.height = workSize;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("Could not prepare a die-cut sticker.");
+  }
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.clearRect(0, 0, workSize, workSize);
+  context.drawImage(image, placement.originX, placement.originY, placement.drawWidth, placement.drawHeight);
+  return context.getImageData(0, 0, workSize, workSize);
+}
+
+function resampleMask(cutout: NativeCutout, placement: DrawPlacement, workSize: number) {
+  const mask = new Uint8Array(workSize * workSize);
+  const source = cutout.mask;
+  const sourceScale = cutout.placement.scale;
+  for (let y = 0; y < workSize; y += 1) {
+    const imageY = (y - placement.originY) / placement.scale;
+    const sourceY = Math.round(cutout.placement.originY + imageY * sourceScale);
+    if (sourceY < 0 || sourceY >= workSize) {
+      continue;
+    }
+    const sourceRow = sourceY * workSize;
+    const row = y * workSize;
+    for (let x = 0; x < workSize; x += 1) {
+      const imageX = (x - placement.originX) / placement.scale;
+      const sourceX = Math.round(cutout.placement.originX + imageX * sourceScale);
+      if (sourceX < 0 || sourceX >= workSize) {
+        continue;
+      }
+      mask[row + x] = source[sourceRow + sourceX];
+    }
+  }
+  return mask;
 }
 
 function alphaBounds(image: ImageData): Bounds | null {
@@ -809,20 +1059,113 @@ function backgroundRemains(
   return kept >= 3;
 }
 
-function renderContained(
-  context: CanvasRenderingContext2D,
-  image: SheetImage,
-  canvasSize: number,
-  box: number,
+function borderGeometry(workSize: number, slotSize: number, borderPx: number, cutGapPx: number) {
+  const raster = workSize / slotSize;
+  const border = Math.max(2, borderPx * raster);
+  const cut = Math.max(1.25, cutGapPx * raster);
+  const margin = border + cut + 2;
+  const content = Math.max(8, workSize - margin * 2);
+  return { border, cut, margin, content };
+}
+
+function spriteFromPaint(
+  workSize: number,
+  painted: ReturnType<typeof paintDieCut>,
+  cut: number,
+): DieCutSprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = workSize;
+  canvas.height = workSize;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Could not prepare a die-cut sticker.");
+  }
+  context.putImageData(painted.output, 0, 0);
+  return {
+    canvas,
+    contour: painted.contour.length ? painted.contour : roundedContour(workSize, cut + 1, workSize * 0.18),
+    bounds: alphaBounds(painted.output) ?? { x: 0, y: 0, width: workSize, height: workSize },
+  };
+}
+
+function buildCutout(image: SheetImage, workSize: number, content: number): SubjectCutout {
+  const frame = subjectFrame(image);
+  if (frame.rounded) {
+    return { kind: "rounded" };
+  }
+  // The 180px probe already found the subject, so the photo is drawn at its final size and masked once.
+  const placement = placementFor(image, frame.rel, workSize, content);
+  const source = drawPlacement(image, placement, workSize);
+  buildStats.cutoutMasks += 1;
+  const mask = subjectMask(source.data, workSize, workSize);
+  const bounds = maskBounds(mask, workSize, workSize);
+  const ratio = bounds ? bounds.count / (workSize * workSize) : 0;
+  if (
+    !bounds ||
+    bounds.width < 1 ||
+    bounds.height < 1 ||
+    ratio < 0.035 ||
+    ratio > 0.94 ||
+    backgroundRemains(mask, workSize, placement.originX, placement.originY, placement.drawWidth, placement.drawHeight)
+  ) {
+    return { kind: "rounded" };
+  }
+  return {
+    kind: "native",
+    source,
+    mask,
+    placement,
+    rel: {
+      x: (bounds.x - placement.originX) / placement.drawWidth,
+      y: (bounds.y - placement.originY) / placement.drawHeight,
+      w: bounds.width / placement.drawWidth,
+      h: bounds.height / placement.drawHeight,
+    },
+  };
+}
+
+export function cachedByKey<T extends object, V>(
+  cache: WeakMap<T, Map<string, V>>,
+  image: T,
+  key: string,
+  create: () => V,
 ) {
-  context.clearRect(0, 0, canvasSize, canvasSize);
-  const scale = Math.min(box / image.width, box / image.height);
-  const drawWidth = image.width * scale;
-  const drawHeight = image.height * scale;
-  const originX = (canvasSize - drawWidth) / 2;
-  const originY = (canvasSize - drawHeight) / 2;
-  context.drawImage(image, originX, originY, drawWidth, drawHeight);
-  return { scale, originX, originY };
+  let bucket = cache.get(image);
+  const existing = bucket?.get(key);
+  if (existing) {
+    return { value: existing, reused: true as const };
+  }
+  const value = create();
+  if (!bucket) {
+    bucket = new Map();
+    cache.set(image, bucket);
+  }
+  bucket.set(key, value);
+  return { value, reused: false as const };
+}
+
+function cutoutFor(image: SheetImage, workSize: number, content: number) {
+  const found = cachedByKey(cutoutCache, image, cutoutCacheKey(workSize), () => buildCutout(image, workSize, content));
+  if (found.reused) {
+    buildStats.cutoutHits += 1;
+  }
+  return found.value;
+}
+
+function paintCutout(
+  image: SheetImage,
+  cutout: NativeCutout,
+  workSize: number,
+  content: number,
+  border: number,
+  cut: number,
+) {
+  const placement = placementFor(image, cutout.rel, workSize, content);
+  const aligned = samePlacement(cutout.placement, placement);
+  const source = aligned ? cutout.source : drawPlacement(image, placement, workSize);
+  const mask = aligned ? cutout.mask : resampleMask(cutout, placement, workSize);
+  buildStats.paints += 1;
+  return spriteFromPaint(workSize, paintDieCut(source, mask, border, cut), cut);
 }
 
 function buildDieCut(
@@ -832,72 +1175,12 @@ function buildDieCut(
   cutGapPx: number,
   workSize: number,
 ) {
-  const canvas = document.createElement("canvas");
-  canvas.width = workSize;
-  canvas.height = workSize;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) {
-    throw new Error("Could not prepare a die-cut sticker.");
-  }
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-
-  const raster = workSize / slotSize;
-  const border = Math.max(2, borderPx * raster);
-  const cut = Math.max(1.25, cutGapPx * raster);
-  const margin = border + cut + 2;
-  const content = Math.max(8, workSize - margin * 2);
-  const first = renderContained(context, image, workSize, content);
-  const firstWidth = image.width * first.scale;
-  const firstHeight = image.height * first.scale;
-  let source = context.getImageData(0, 0, workSize, workSize);
-  let mask = subjectMask(source.data, workSize, workSize);
-  let bounds = maskBounds(mask, workSize, workSize);
-  const subjectRatio = bounds ? bounds.count / (workSize * workSize) : 0;
-
-  if (
-    !bounds ||
-    subjectRatio < 0.035 ||
-    subjectRatio > 0.94 ||
-    backgroundRemains(mask, workSize, first.originX, first.originY, firstWidth, firstHeight)
-  ) {
+  const { border, cut, margin, content } = borderGeometry(workSize, slotSize, borderPx, cutGapPx);
+  const cutout = cutoutFor(image, workSize, content);
+  if (cutout.kind === "rounded") {
     return roundedDieCut(image, workSize, margin, border);
   }
-
-  const longest = Math.max(bounds.width, bounds.height);
-  if (longest > 0 && longest < content * 0.94) {
-    const fit = content / longest;
-    const boundsCenterX = bounds.x + bounds.width / 2;
-    const boundsCenterY = bounds.y + bounds.height / 2;
-    const finalScale = first.scale * fit;
-    const finalOriginX = workSize / 2 + (first.originX - boundsCenterX) * fit;
-    const finalOriginY = workSize / 2 + (first.originY - boundsCenterY) * fit;
-    const finalWidth = image.width * finalScale;
-    const finalHeight = image.height * finalScale;
-    context.clearRect(0, 0, workSize, workSize);
-    context.drawImage(image, finalOriginX, finalOriginY, finalWidth, finalHeight);
-    source = context.getImageData(0, 0, workSize, workSize);
-    mask = subjectMask(source.data, workSize, workSize);
-    bounds = maskBounds(mask, workSize, workSize);
-    const refitRatio = bounds ? bounds.count / (workSize * workSize) : 0;
-    if (
-      !bounds ||
-      refitRatio < 0.035 ||
-      refitRatio > 0.94 ||
-      backgroundRemains(mask, workSize, finalOriginX, finalOriginY, finalWidth, finalHeight)
-    ) {
-      return roundedDieCut(image, workSize, margin, border);
-    }
-  }
-
-  const painted = paintDieCut(source, mask, border, cut);
-  context.putImageData(painted.output, 0, 0);
-  const contour = painted.contour.length ? painted.contour : roundedContour(workSize, cut + 1, workSize * 0.18);
-  return {
-    canvas,
-    contour,
-    bounds: alphaBounds(painted.output) ?? { x: 0, y: 0, width: workSize, height: workSize },
-  };
+  return paintCutout(image, cutout, workSize, content, border, cut);
 }
 
 function roundedDieCut(image: SheetImage, size: number, margin: number, border: number) {
@@ -953,19 +1236,13 @@ function dieCutFor(
   cutGapPx: number,
   workSize: number,
 ) {
-  const key = `${workSize}:${borderPx.toFixed(2)}:${cutGapPx.toFixed(2)}`;
-  let cached = dieCutCache.get(image);
-  const existing = cached?.get(key);
-  if (existing) {
-    return existing;
+  const found = cachedByKey(dieCutCache, image, spriteCacheKey(workSize, borderPx, cutGapPx), () =>
+    buildDieCut(image, slotSize, borderPx, cutGapPx, workSize),
+  );
+  if (found.reused) {
+    buildStats.spriteHits += 1;
   }
-  const sprite = buildDieCut(image, slotSize, borderPx, cutGapPx, workSize);
-  if (!cached) {
-    cached = new Map();
-    dieCutCache.set(image, cached);
-  }
-  cached.set(key, sprite);
-  return sprite;
+  return found.value;
 }
 
 function placeDieCut(sprite: DieCutSprite, slot: SheetSlot): StickerPlacement {
@@ -981,12 +1258,7 @@ function placeDieCut(sprite: DieCutSprite, slot: SheetSlot): StickerPlacement {
   };
 }
 
-function buildDieCuts(
-  images: SheetImage[],
-  layout: ReturnType<typeof layoutStickerSheet>,
-  padding: number,
-  scale: number,
-) {
+function slotChrome(layout: ReturnType<typeof layoutStickerSheet>, padding: number) {
   const slot = layout.slots[0];
   const slotLong = Math.max(slot.width, slot.height);
   const slotShort = Math.min(slot.width, slot.height);
@@ -995,37 +1267,99 @@ function buildDieCuts(
   const chrome = borderPx + cutGapPx;
   const chromeLimit = slotShort * 0.16;
   const chromeScale = chrome > chromeLimit ? chromeLimit / chrome : 1;
-  const border = borderPx * chromeScale;
-  const cutGap = cutGapPx * chromeScale;
-  const workSize = Math.max(48, Math.round(scale < 1 ? Math.min(slotLong, 460) : slotLong));
-  const prepared = images.map((artwork) => dieCutFor(artwork, slotLong, border, cutGap, workSize));
-  return { prepared, slotShort };
+  return {
+    slotLong,
+    slotShort,
+    borderPx: borderPx * chromeScale,
+    cutGapPx: cutGapPx * chromeScale,
+  };
+}
+
+function dieCutAt(
+  image: SheetImage,
+  chrome: ReturnType<typeof slotChrome>,
+  scale: number,
+) {
+  const workSize = cappedWorkSize({
+    slotLong: chrome.slotLong,
+    sourceMaxEdge: Math.max(image.width, image.height),
+    scale,
+  });
+  return dieCutFor(image, chrome.slotLong, chrome.borderPx, chrome.cutGapPx, workSize);
+}
+
+function drawnAspect(prepared: DieCutSprite[]) {
+  return (
+    prepared.reduce((sum, sprite) => sum + sprite.bounds.width / Math.max(1, sprite.bounds.height), 0) /
+    prepared.length
+  );
+}
+
+/**
+ * Cell shape follows the subjects, not the white border. A new photo can still
+ * reflow the grid when its shape is different, but the cut-out cache is per bitmap
+ * and work size, so the other stickers are not masked again.
+ */
+function layoutForSubjects(images: SheetImage[], count: SheetCount, size: SheetSize) {
+  const aspect = images.reduce((sum, artwork) => sum + subjectAspect(artwork), 0) / images.length;
+  return layoutStickerSheet(count, size, aspect);
+}
+
+function buildDieCuts(images: SheetImage[], layout: ReturnType<typeof layoutStickerSheet>, padding: number, scale: number) {
+  const chrome = slotChrome(layout, padding);
+  const prepared = images.map((artwork) => dieCutAt(artwork, chrome, scale));
+  return { prepared, slotShort: chrome.slotShort, layout };
+}
+
+async function buildDieCutsAsync(
+  images: SheetImage[],
+  layout: ReturnType<typeof layoutStickerSheet>,
+  padding: number,
+  scale: number,
+  control?: SheetBuildControl,
+) {
+  const chrome = slotChrome(layout, padding);
+  const prepared: DieCutSprite[] = [];
+  for (const artwork of images) {
+    throwIfCancelled(control?.signal);
+    prepared.push(dieCutAt(artwork, chrome, scale));
+    if (control?.afterSticker) {
+      await control.afterSticker();
+    }
+  }
+  return { prepared, slotShort: chrome.slotShort, layout };
 }
 
 function fitDieCuts(images: SheetImage[], count: SheetCount, size: SheetSize, padding: number, scale: number) {
-  let aspect = images.reduce((sum, artwork) => sum + subjectAspect(artwork), 0) / images.length;
-  let layout = layoutStickerSheet(count, size, aspect);
-  const probeScale = Math.min(scale, 0.35);
-  let built = buildDieCuts(images, layout, padding, probeScale);
-
-  for (let pass = 0; pass < 4; pass += 1) {
-    const drawn =
-      built.prepared.reduce((sum, sprite) => sum + sprite.bounds.width / Math.max(1, sprite.bounds.height), 0) /
-      built.prepared.length;
-    const next = Math.min(1.8, Math.max(0.55, drawn));
-    if (Math.abs(next - aspect) <= 0.004) {
-      break;
-    }
-    aspect = next;
-    layout = layoutStickerSheet(count, size, aspect);
-    built = buildDieCuts(images, layout, padding, probeScale);
-  }
-
-  if (probeScale !== scale) {
+  let layout = layoutForSubjects(images, count, size);
+  let built = buildDieCuts(images, layout, padding, scale);
+  const next = clampAspect(drawnAspect(built.prepared));
+  const current = layout.slots[0].width / Math.max(1, layout.slots[0].height);
+  if (Math.abs(next - current) > 0.02) {
+    layout = layoutStickerSheet(count, size, next);
     built = buildDieCuts(images, layout, padding, scale);
   }
+  return { layout: built.layout, prepared: built.prepared, slotShort: built.slotShort };
+}
 
-  return { layout, prepared: built.prepared, slotShort: built.slotShort };
+async function fitDieCutsAsync(
+  images: SheetImage[],
+  count: SheetCount,
+  size: SheetSize,
+  padding: number,
+  scale: number,
+  control?: SheetBuildControl,
+) {
+  let layout = layoutForSubjects(images, count, size);
+  let built = await buildDieCutsAsync(images, layout, padding, scale, control);
+  const next = clampAspect(drawnAspect(built.prepared));
+  const current = layout.slots[0].width / Math.max(1, layout.slots[0].height);
+  if (Math.abs(next - current) > 0.02) {
+    throwIfCancelled(control?.signal);
+    layout = layoutStickerSheet(count, size, next);
+    built = await buildDieCutsAsync(images, layout, padding, scale, control);
+  }
+  return { layout: built.layout, prepared: built.prepared, slotShort: built.slotShort };
 }
 
 function strokeContours(context: CanvasRenderingContext2D, contours: Point[][], placement: StickerPlacement) {
@@ -1051,18 +1385,15 @@ function strokeContours(context: CanvasRenderingContext2D, contours: Point[][], 
   context.stroke();
 }
 
-export function drawStickerSheet(
-  context: CanvasRenderingContext2D,
-  image: SheetImage | readonly SheetImage[],
-  options: {
-    count: SheetCount;
-    size: SheetSize;
-    background: SheetBackground;
-    padding: number;
-    scale?: number;
-  },
-) {
-  const images = sheetImages(image);
+type SheetDrawOptions = {
+  count: SheetCount;
+  size: SheetSize;
+  background: SheetBackground;
+  padding: number;
+  scale?: number;
+};
+
+function prepareSheetCanvas(context: CanvasRenderingContext2D, options: SheetDrawOptions) {
   const scale = options.scale ?? 1;
   const page = sheetPixels(options.size);
   const canvas = context.canvas;
@@ -1071,34 +1402,28 @@ export function drawStickerSheet(
   context.setTransform(scale, 0, 0, scale, 0, 0);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-
   context.clearRect(0, 0, page.width, page.height);
   const backgroundColor = SHEET_BACKGROUNDS.find((item) => item.id === options.background)?.color;
   if (backgroundColor) {
     context.fillStyle = backgroundColor;
     context.fillRect(0, 0, page.width, page.height);
   }
+  return { scale, page };
+}
 
-  if (!images.length) {
-    return;
-  }
-
-  const { layout, prepared, slotShort } = fitDieCuts(
-    images,
-    options.count,
-    options.size,
-    options.padding,
-    scale,
-  );
-
-  layout.slots.forEach((cell, index) => {
-    const sprite = prepared[index % prepared.length];
+function compositeStickers(
+  context: CanvasRenderingContext2D,
+  background: SheetBackground,
+  built: { layout: ReturnType<typeof layoutStickerSheet>; prepared: DieCutSprite[]; slotShort: number },
+) {
+  built.layout.slots.forEach((cell, index) => {
+    const sprite = built.prepared[index % built.prepared.length];
     const placement = placeDieCut(sprite, cell);
     context.save();
-    if (options.background !== "transparent") {
+    if (background !== "transparent") {
       context.shadowColor = "rgba(28, 25, 23, 0.13)";
-      context.shadowBlur = Math.max(8, slotShort * 0.028);
-      context.shadowOffsetY = Math.max(3, slotShort * 0.01);
+      context.shadowBlur = Math.max(8, built.slotShort * 0.028);
+      context.shadowOffsetY = Math.max(3, built.slotShort * 0.01);
     }
     context.drawImage(
       sprite.canvas,
@@ -1121,11 +1446,58 @@ export function drawStickerSheet(
   context.setLineDash([1.55 * MM, 1.15 * MM]);
   context.lineCap = "round";
   context.lineJoin = "round";
-  layout.slots.forEach((cell, index) => {
-    const sprite = prepared[index % prepared.length];
+  built.layout.slots.forEach((cell, index) => {
+    const sprite = built.prepared[index % built.prepared.length];
     strokeContours(context, sprite.contour, placeDieCut(sprite, cell));
   });
   context.restore();
+}
+
+export function drawStickerSheet(
+  context: CanvasRenderingContext2D,
+  image: SheetImage | readonly SheetImage[],
+  options: SheetDrawOptions,
+) {
+  const images = sheetImages(image);
+  const { scale } = prepareSheetCanvas(context, options);
+  if (!images.length) {
+    return;
+  }
+  const built = fitDieCuts(images, options.count, options.size, options.padding, scale);
+  compositeStickers(context, options.background, built);
+}
+
+export async function drawStickerSheetAsync(
+  context: CanvasRenderingContext2D,
+  image: SheetImage | readonly SheetImage[],
+  options: SheetDrawOptions,
+  control?: SheetBuildControl,
+) {
+  const images = sheetImages(image);
+  const { scale } = prepareSheetCanvas(context, options);
+  if (!images.length) {
+    return;
+  }
+  const built = await fitDieCutsAsync(images, options.count, options.size, options.padding, scale, control);
+  throwIfCancelled(control?.signal);
+  compositeStickers(context, options.background, built);
+}
+
+/** Build print-resolution cut-outs without touching the preview canvas. Safe to cancel between stickers. */
+export async function warmPrintDieCuts(
+  image: SheetImage | readonly SheetImage[],
+  options: {
+    count: SheetCount;
+    size: SheetSize;
+    padding: number;
+  },
+  control?: SheetBuildControl,
+) {
+  const images = sheetImages(image);
+  if (!images.length) {
+    return;
+  }
+  await fitDieCutsAsync(images, options.count, options.size, options.padding, 1, control);
 }
 
 function pngCrc32(data: Uint8Array) {

@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { MakingProgress } from "@/components/MakingProgress";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { PHOTO_UPLOAD_INPUT_ID } from "@/components/UploadLink";
-import { SignInPrompt } from "@/components/SignInPrompt";
+import { SignInPrompt, type SignedInResult } from "@/components/SignInPrompt";
 import { StickerSheet } from "@/components/StickerSheet";
+import type { GoogleLinkFallback } from "@/lib/auth-errors";
+import { isAnonymousUser, isPermanentUser } from "@/lib/auth-user";
+import { PRIVACY_NOTICE } from "@/lib/copy";
+import { GUEST_LIMIT_CODE, GUEST_LIMIT_MESSAGE } from "@/lib/generation-quota";
+import { rewriteStorageOwner } from "@/lib/guest-migrate";
 import { displaySrc } from "@/lib/image-source";
+import { buildSheetState, clearSheetState, loadSheetState, saveSheetState, type SheetStateSettings } from "@/lib/sheet-state";
+import type { SignInPurpose } from "@/lib/sign-in-flow";
 import {
   missingItemsColumn,
   missingStyleColumn,
@@ -18,6 +26,7 @@ import {
   toSheetRecord,
   type SheetPreset,
 } from "@/lib/sheets";
+import type { SheetBackground, SheetCount, SheetSize } from "@/lib/sticker-sheet";
 import { isStickerStyle, STICKER_STYLES, STYLE_LABELS, styleLabel, type StickerStyle } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/client";
 
@@ -35,18 +44,18 @@ type SheetPhoto = {
   error: string | null;
 };
 
-const LOCAL_ONLY_AI_ERROR = "This photo stayed in your browser. Remove it and add it again to use AI styles.";
+const LOCAL_ONLY_AI_ERROR = "This photo stayed on this device. Remove it and add it again to use AI styles.";
 
 async function requestStyledImage(
   imageUrl: string,
   style: StickerStyle,
-): Promise<{ imageUrl?: string; error?: string; needsSignIn?: boolean }> {
+): Promise<{ imageUrl?: string; error?: string; limitReached?: boolean; needsRetry?: boolean }> {
   const response = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ imageUrl, style }),
   });
-  let payload: { imageUrl?: string; error?: string } = {};
+  let payload: { imageUrl?: string; error?: string; code?: string } = {};
   try {
     payload = (await response.json()) as typeof payload;
   } catch {
@@ -56,12 +65,15 @@ async function requestStyledImage(
     return { imageUrl: payload.imageUrl };
   }
   if (response.status === 401) {
-    return { error: "Sign in to use AI styles.", needsSignIn: true };
+    return { error: "We couldn't style this photo. Try choosing the style again.", needsRetry: true };
+  }
+  if (response.status === 429 && payload.code === GUEST_LIMIT_CODE) {
+    return { error: payload.error ?? GUEST_LIMIT_MESSAGE, limitReached: true };
   }
   if (response.status === 429) {
-    return { error: payload.error ?? "You've used AI styles a lot just now. Please wait and try again." };
+    return { error: payload.error ?? "That's a lot of AI styles just now. Please wait and try again." };
   }
-  return { error: payload.error ?? "Could not style this photo. Please try again." };
+  return { error: payload.error ?? "We couldn't style this photo. Please try again." };
 }
 
 function displayUrl(photo: SheetPhoto) {
@@ -76,36 +88,53 @@ function StyleChoices({
   onChange,
   label,
   photoUrl,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   label: string;
   photoUrl?: string | null;
+  disabled?: boolean;
 }) {
   const options: { id: string; name: string; image: string | null }[] = [
     { id: "photo", name: "Photo", image: photoUrl ?? null },
-    ...STICKER_STYLES.map((id) => ({ id, name: STYLE_LABELS[id], image: `/styles/${id}.jpg` })),
+    ...STICKER_STYLES.map((id) => ({ id, name: STYLE_LABELS[id], image: `/styles/${id}.webp` })),
   ];
 
   return (
-    <fieldset className="space-y-2">
+    <fieldset className="space-y-2" aria-busy={disabled || undefined}>
       <legend className="text-sm font-medium">{label}</legend>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
         {options.map((option) => {
           const selected = value === option.id;
+          const isStyleThumb = option.id !== "photo";
           return (
             <button
               key={option.id}
               type="button"
               aria-pressed={selected}
-              onClick={() => onChange(option.id)}
-              className={`rounded-xl border p-1.5 text-center ${
-                selected ? "border-accent bg-orange-50 ring-2 ring-orange-100" : "border-border bg-white hover:border-stone-300"
+              disabled={disabled}
+              onClick={() => {
+                if (disabled) {
+                  return;
+                }
+                onChange(option.id);
+              }}
+              className={`rounded-xl border p-1.5 text-center disabled:cursor-not-allowed disabled:opacity-60 ${
+                selected ? "border-accent bg-accent-soft ring-2 ring-accent-soft" : "border-border bg-white hover:border-stone-300"
               }`}
             >
               {option.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={option.image} alt="" className="aspect-square w-full rounded-lg bg-stone-50 object-cover" />
+                <img
+                  src={option.image}
+                  alt=""
+                  width={isStyleThumb ? 400 : undefined}
+                  height={isStyleThumb ? 400 : undefined}
+                  loading={isStyleThumb ? "lazy" : undefined}
+                  decoding="async"
+                  className="aspect-square w-full rounded-lg bg-stone-50 object-cover"
+                />
               ) : (
                 <span className="block aspect-square w-full rounded-lg bg-stone-100" />
               )}
@@ -119,21 +148,31 @@ function StyleChoices({
 }
 
 export function StickerCreator({ initialSheetId }: { initialSheetId: string | null }) {
-  const { user, loading } = useAuth();
+  const { user, loading, ensureAnonymousSession } = useAuth();
   const [photos, setPhotos] = useState<SheetPhoto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preset, setPreset] = useState<SheetPreset | null>(null);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
-  const [signInPrompt, setSignInPrompt] = useState<"photos" | "download" | "ai" | null>(null);
+  const [signInPrompt, setSignInPrompt] = useState<SignInPurpose | null>(null);
+  const [guestLimit, setGuestLimit] = useState(false);
+  const [googleNotice, setGoogleNotice] = useState<GoogleLinkFallback | null>(null);
+  const [autoDownload, setAutoDownload] = useState(false);
   const inflightRef = useRef(new Set<string>());
   const failedRef = useRef(new Set<string>());
+  const styleRunLockRef = useRef(false);
   const mountedRef = useRef(true);
   const photoIdsRef = useRef<string[]>([]);
   const selectedIntentRef = useRef<string | null>(null);
-  const guest = !loading && !user;
-  const photoCap = guest ? 1 : MAX_PHOTOS;
-  const photoCapRef = useRef(photoCap);
-  photoCapRef.current = photoCap;
+  const ensureRef = useRef(ensureAnonymousSession);
+  useEffect(() => {
+    ensureRef.current = ensureAnonymousSession;
+  });
+  const settingsRef = useRef<SheetStateSettings>({ count: 9, size: "a4", background: "white", padding: 12 });
+  const onSettings = useCallback((settings: SheetStateSettings) => {
+    settingsRef.current = settings;
+  }, []);
+  const finishAutoDownload = useCallback(() => setAutoDownload(false), []);
+  const permanent = isPermanentUser(user);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -166,12 +205,151 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   }, [photos]);
 
   useEffect(() => {
+    const auth = new URLSearchParams(window.location.search).get("auth");
+    if (auth !== "google-taken" && auth !== "linking-off") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setGoogleNotice(auth);
+      setSignInPrompt("download");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+    let saved: ReturnType<typeof loadSheetState>;
+    try {
+      saved = loadSheetState(window.sessionStorage);
+    } catch {
+      return;
+    }
+    if (!saved.ok) {
+      if (saved.reason !== "empty") {
+        try {
+          clearSheetState(window.sessionStorage);
+        } catch {
+          // The bad payload can stay until the tab closes.
+        }
+      }
+      return;
+    }
+    if (!permanent || !user) {
+      return;
+    }
+    const snapshot = saved.value;
+    let cancelled = false;
+
+    void (async () => {
+      // Let a strict-mode remount cancel this run before we touch storage.
+      await Promise.resolve();
+      if (cancelled) {
+        return;
+      }
+      let nextPhotos = snapshot.photos;
+      if (snapshot.guestUserId && snapshot.guestUserId !== user.id) {
+        try {
+          const response = await fetch("/api/guest-migrate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          });
+          if (response.ok) {
+            const body = (await response.json()) as { fromId?: string; toId?: string; sheetsNote?: string | null };
+            if (body.fromId && body.toId) {
+              nextPhotos = nextPhotos.map((photo) => ({
+                ...photo,
+                storedUrl: rewriteStorageOwner(photo.storedUrl, body.fromId as string, body.toId as string),
+                results: Object.fromEntries(
+                  Object.entries(photo.results).map(([key, url]) => [
+                    key,
+                    rewriteStorageOwner(url, body.fromId as string, body.toId as string),
+                  ]),
+                ),
+              }));
+            }
+            if (body.sheetsNote) {
+              setRestoreNote(body.sheetsNote);
+            }
+          } else if (mountedRef.current) {
+            setRestoreNote("You're signed in, but we couldn't move every photo onto this account. If one is missing, add it once more.");
+          }
+        } catch {
+          if (mountedRef.current) {
+            setRestoreNote("You're signed in, but we couldn't move every photo onto this account. If one is missing, add it once more.");
+          }
+        }
+      }
+      if (cancelled || !mountedRef.current) {
+        return;
+      }
+      const settings = snapshot.settings;
+      setPreset({
+        id: "restored",
+        source: "photo",
+        style: null,
+        count: settings.count as SheetCount,
+        size: settings.size as SheetSize,
+        background: settings.background as SheetBackground,
+        padding: settings.padding,
+        items: [],
+      });
+      setPhotos(
+        nextPhotos.map((photo) => {
+          const style = photo.style && isStickerStyle(photo.style) ? photo.style : null;
+          const results: SheetPhoto["results"] = {};
+          for (const [key, url] of Object.entries(photo.results)) {
+            if (isStickerStyle(key)) {
+              results[key] = url;
+            }
+          }
+          return {
+            id: photo.id,
+            previewUrl: photo.storedUrl,
+            storedUrl: photo.storedUrl,
+            style,
+            results,
+            uploadFailed: false,
+            localOnly: false,
+            error: null,
+          };
+        }),
+      );
+      if (snapshot.selectedId) {
+        selectedIntentRef.current = snapshot.selectedId;
+        setSelectedId(snapshot.selectedId);
+      }
+      if (snapshot.intent === "download") {
+        setAutoDownload(true);
+      }
+      try {
+        clearSheetState(window.sessionStorage);
+      } catch {
+        // The snapshot is already on the page.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, permanent, user]);
+
+  useEffect(() => {
     if (!initialSheetId || loading) {
       return;
     }
+    try {
+      if (loadSheetState(window.sessionStorage).ok) {
+        return;
+      }
+    } catch {
+      // No saved guest sheet. Open the link as usual.
+    }
 
-    if (!user) {
-      setRestoreNote("Sign in to open this saved sheet. You can still make a new one here.");
+    if (!permanent) {
+      setRestoreNote("Sign in to open this saved sheet. You can still start a new one here.");
       return;
     }
 
@@ -214,13 +392,13 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
         }
         const record = row ? toSheetRecord(row) : null;
         if (queryError || !record) {
-          setRestoreNote("That sheet could not be opened.");
+          setRestoreNote("We couldn't open that sheet.");
           return;
         }
 
         const restored = sheetItems(record);
         if (!restored.length) {
-          setRestoreNote("That sheet could not be opened.");
+          setRestoreNote("We couldn't open that sheet.");
           return;
         }
         setRestoreNote(null);
@@ -245,12 +423,12 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
     return () => {
       cancelled = true;
     };
-  }, [initialSheetId, loading, user]);
+  }, [initialSheetId, loading, permanent]);
 
   useEffect(() => {
     for (const photo of photos) {
       const style = photo.style;
-      if (!style || !photo.storedUrl || photo.uploadFailed || photo.results[style]) {
+      if (!style || !photo.storedUrl || photo.uploadFailed || photo.localOnly || photo.results[style]) {
         continue;
       }
       const key = `${photo.id}:${style}`;
@@ -258,15 +436,22 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
         continue;
       }
       inflightRef.current.add(key);
+      styleRunLockRef.current = true;
       const storedUrl = photo.storedUrl;
       void (async () => {
         try {
-          const payload = await requestStyledImage(storedUrl, style);
-          if (!payload.imageUrl) {
-            if (payload.needsSignIn && mountedRef.current) {
-              setSignInPrompt("ai");
+          let payload = await requestStyledImage(storedUrl, style);
+          if (!payload.imageUrl && payload.needsRetry) {
+            const session = await ensureRef.current();
+            if (session.ok) {
+              payload = await requestStyledImage(storedUrl, style);
             }
-            throw new Error(payload.error);
+          }
+          if (!payload.imageUrl) {
+            if (payload.limitReached && mountedRef.current) {
+              setGuestLimit(true);
+            }
+            throw new Error(payload.error || "We couldn't style this photo.");
           }
           const styledUrl = payload.imageUrl;
           if (!mountedRef.current) {
@@ -289,20 +474,35 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
             return;
           }
           failedRef.current.add(key);
-          const message = error instanceof Error ? error.message : "Could not style this photo.";
+          const message = error instanceof Error ? error.message : "We couldn't style this photo.";
           setPhotos((current) =>
             current.map((item) => (item.id === photo.id && item.style === style ? { ...item, error: message } : item)),
           );
         } finally {
           inflightRef.current.delete(key);
+          if (inflightRef.current.size === 0) {
+            styleRunLockRef.current = false;
+          }
         }
       })();
     }
+    if (inflightRef.current.size === 0) {
+      styleRunLockRef.current = false;
+    }
   }, [photos]);
+
+  async function prepareSession() {
+    try {
+      const result = await ensureAnonymousSession();
+      return result.ok;
+    } catch {
+      return false;
+    }
+  }
 
   function addPhoto(photo: { id: string; previewUrl: string }) {
     setPhotos((current) =>
-      current.length >= photoCapRef.current || current.some((item) => item.id === photo.id)
+      current.length >= MAX_PHOTOS || current.some((item) => item.id === photo.id)
         ? current
         : [
             ...current,
@@ -313,7 +513,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               style: null,
               results: {},
               uploadFailed: false,
-              localOnly: !user,
+              localOnly: false,
               error: null,
             },
           ],
@@ -321,13 +521,31 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   }
 
   function storePhoto(id: string, url: string) {
-    setPhotos((current) => current.map((photo) => (photo.id === id ? { ...photo, storedUrl: url } : photo)));
-  }
-
-  function failPhoto(id: string) {
     setPhotos((current) =>
       current.map((photo) =>
-        photo.id === id ? { ...photo, uploadFailed: true, error: "Upload didn't finish. You can still print this photo." } : photo,
+        photo.id === id ? { ...photo, storedUrl: url, localOnly: false, uploadFailed: false, error: null } : photo,
+      ),
+    );
+  }
+
+  function failPhoto(id: string, reason?: string) {
+    if (reason === "session") {
+      setPhotos((current) =>
+        current.map((photo) =>
+          photo.id === id
+            ? {
+                ...photo,
+                localOnly: true,
+                error: "We couldn't store this photo privately just now. You can still preview it. Try adding it again to use an AI style.",
+              }
+            : photo,
+        ),
+      );
+      return;
+    }
+    setPhotos((current) =>
+      current.map((photo) =>
+        photo.id === id ? { ...photo, uploadFailed: true, error: "The upload didn't finish. You can still print this photo." } : photo,
       ),
     );
   }
@@ -343,14 +561,19 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   }
 
   function chooseStyle(id: string, value: string) {
-    const style = isStickerStyle(value) ? value : null;
-    if (style && guest) {
-      // AI styles send the photo to fal.ai, so they need an account; guests keep the Photo style locally.
-      setSignInPrompt("ai");
+    if (styleRunLockRef.current) {
       return;
     }
+    const style = isStickerStyle(value) ? value : null;
     if (style) {
       failedRef.current.delete(`${id}:${style}`);
+    }
+    const photo = photos.find((item) => item.id === id);
+    const willRun = Boolean(
+      style && photo?.storedUrl && !photo.uploadFailed && !photo.localOnly && !photo.results[style],
+    );
+    if (willRun) {
+      styleRunLockRef.current = true;
     }
     setPhotos((current) =>
       current.map((photo) => {
@@ -366,10 +589,16 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   }
 
   function applyStyleToAll(value: string) {
-    const style = isStickerStyle(value) ? value : null;
-    if (style && guest) {
-      setSignInPrompt("ai");
+    if (styleRunLockRef.current) {
       return;
+    }
+    const style = isStickerStyle(value) ? value : null;
+    const willRun = Boolean(
+      style &&
+        photos.some((photo) => photo.storedUrl && !photo.uploadFailed && !photo.localOnly && !photo.results[style]),
+    );
+    if (willRun) {
+      styleRunLockRef.current = true;
     }
     setPhotos((current) =>
       current.map((photo) => {
@@ -384,6 +613,66 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
     );
   }
 
+  function persistForGoogle(purpose: SignInPurpose) {
+    const built = buildSheetState({
+      intent: purpose,
+      guestUserId: isAnonymousUser(user) ? user?.id ?? null : null,
+      photos: photos.map((photo) => ({
+        id: photo.id,
+        storedUrl: photo.storedUrl,
+        style: photo.style,
+        results: photo.results,
+      })),
+      selectedId,
+      settings: settingsRef.current,
+    });
+    if (!built.ok) {
+      return false;
+    }
+    try {
+      return saveSheetState(window.sessionStorage, built.value);
+    } catch {
+      return false;
+    }
+  }
+
+  function handleSignedIn(result: SignedInResult) {
+    if (result.fromId && result.toId) {
+      const fromId = result.fromId;
+      const toId = result.toId;
+      setPhotos((current) =>
+        current.map((photo) => ({
+          ...photo,
+          previewUrl: rewriteStorageOwner(photo.previewUrl, fromId, toId),
+          storedUrl: photo.storedUrl ? rewriteStorageOwner(photo.storedUrl, fromId, toId) : photo.storedUrl,
+          results: Object.fromEntries(
+            Object.entries(photo.results).map(([key, url]) => [key, url ? rewriteStorageOwner(url, fromId, toId) : url]),
+          ) as SheetPhoto["results"],
+        })),
+      );
+    }
+    if (result.note) {
+      setRestoreNote(result.note);
+    }
+    setGuestLimit(false);
+    setPhotos((current) =>
+      current.map((photo) => {
+        if (photo.error !== GUEST_LIMIT_MESSAGE) {
+          return photo;
+        }
+        if (photo.style) {
+          failedRef.current.delete(`${photo.id}:${photo.style}`);
+        }
+        return { ...photo, error: null };
+      }),
+    );
+    setSignInPrompt(null);
+    setGoogleNotice(null);
+    if (result.purpose === "download") {
+      setAutoDownload(true);
+    }
+  }
+
   const selected = photos.find((photo) => photo.id === selectedId) ?? photos[0] ?? null;
   const selectedIndex = selected ? photos.findIndex((photo) => photo.id === selected.id) : -1;
   const first = photos[0];
@@ -396,31 +685,30 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
     <div className="space-y-5">
       {restoreNote ? (
         <p role="status" className="text-sm text-muted">
-          {restoreNote}
+          {restoreNote}{" "}
+          {!permanent && initialSheetId ? (
+            <button type="button" onClick={() => setSignInPrompt("save")} className="font-medium text-foreground underline">
+              Sign in
+            </button>
+          ) : null}
         </p>
       ) : null}
 
       <section
         id="upload"
         tabIndex={-1}
-        className="scroll-mt-6 rounded-3xl border border-border bg-surface p-5 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-7"
+        className="sticker-panel scroll-mt-6 p-5 outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-7"
       >
-        <h2 className="text-lg font-semibold tracking-tight">Photos</h2>
-        <p className="mt-1 text-sm leading-6 text-muted">
-          {guest
-            ? "Add one photo to preview your sheet. It stays in this browser until you sign in. Sign in to use AI styles, add more photos, or download it."
-            : "Upload one photo or several. Click a photo, then pick its style."}
-        </p>
+        <h2 className="font-display text-xl font-bold tracking-tight"><span className="step-dot">1</span> Your photos</h2>
+        <p className="mt-1 text-sm leading-6 text-muted">One photo or a bunch. Tap one, then pick its look.</p>
+        <p className="mt-2 text-sm leading-6 text-muted">{PRIVACY_NOTICE}</p>
         <div className="mt-5">
           {photos.length === 0 ? (
             <PhotoUpload
               showHeading={false}
-              remainingExtras={photoCap}
-              idleLabel={guest ? "Drop a photo here" : undefined}
-              idleHint={guest ? "One photo to try. PNG, JPG, or WEBP." : undefined}
-              onLimit={guest ? () => setSignInPrompt("photos") : undefined}
+              remainingExtras={MAX_PHOTOS}
               inputId={PHOTO_UPLOAD_INPUT_ID}
-              upload={Boolean(user)}
+              prepareSession={prepareSession}
               onPhoto={addPhoto}
               onPhotoStored={storePhoto}
               onPhotoFailed={failPhoto}
@@ -444,7 +732,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                         }}
                         className={`w-full rounded-2xl border p-1.5 text-center ${
                           active
-                            ? "border-accent bg-orange-50 ring-2 ring-orange-100"
+                            ? "border-accent bg-accent-soft ring-2 ring-accent-soft"
                             : "border-border bg-white hover:border-stone-300"
                         }`}
                       >
@@ -459,7 +747,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                         </span>
                         {styling ? <span className="mt-0.5 block text-[10px] text-muted">Styling…</span> : null}
                         {photo.error && !styling ? (
-                          <span className="mt-0.5 block text-[10px] text-red-600">Needs attention</span>
+                          <span className="mt-0.5 block text-[10px] text-red-600">Needs a look</span>
                         ) : null}
                       </button>
                       <button
@@ -476,19 +764,22 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               </ul>
               {selected ? (
                 <div className="space-y-3">
+                  {stylingCount > 0 ? <MakingProgress count={stylingCount} /> : null}
                   <StyleChoices
                     label={`Style for photo ${selectedIndex + 1}`}
                     value={selected.style ?? "photo"}
                     photoUrl={displaySrc(selected.previewUrl)}
+                    disabled={stylingCount > 0}
                     onChange={(value) => chooseStyle(selected.id, value)}
                   />
                   {photos.length > 1 ? (
                     <button
                       type="button"
                       onClick={() => applyStyleToAll(selected.style ?? "photo")}
-                      className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
+                      disabled={stylingCount > 0}
+                      className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Apply this style to all photos
+                      Use this style on every photo
                     </button>
                   ) : null}
                   {selected.error ? (
@@ -498,31 +789,13 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                   ) : null}
                 </div>
               ) : null}
-              {guest ? (
-                <div className="space-y-2">
-                  <label className="relative inline-flex cursor-pointer overflow-hidden rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium hover:border-stone-300">
-                    <input
-                      id={PHOTO_UPLOAD_INPUT_ID}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                      aria-label="Add photos"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        setSignInPrompt("photos");
-                      }}
-                      className="absolute inset-0 z-10 cursor-pointer opacity-0"
-                    />
-                    Add photos
-                  </label>
-                  <p className="text-sm text-muted">Sign in to upload another photo or download your sheet.</p>
-                </div>
-              ) : photos.length < MAX_PHOTOS ? (
+              {photos.length < MAX_PHOTOS ? (
                 <PhotoUpload
                   variant="button"
                   buttonLabel="Add photos"
                   remainingExtras={MAX_PHOTOS - photos.length}
                   inputId={PHOTO_UPLOAD_INPUT_ID}
-                  upload={Boolean(user)}
+                  prepareSession={prepareSession}
                   onPhoto={addPhoto}
                   onPhotoStored={storePhoto}
                   onPhotoFailed={failPhoto}
@@ -533,6 +806,21 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
         </div>
       </section>
 
+      {guestLimit ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent-line bg-accent-soft px-4 py-3">
+          <p role="status" className="text-sm font-medium">
+            {GUEST_LIMIT_MESSAGE}
+          </p>
+          <button
+            type="button"
+            onClick={() => setSignInPrompt("limit")}
+            className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong"
+          >
+            Sign in
+          </button>
+        </div>
+      ) : null}
+
       {photos.length > 0 ? (
         <StickerSheet
           key={preset?.id ?? "draft"}
@@ -542,6 +830,9 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
           generatedStyle={firstStyled && first?.style ? first.style : null}
           pendingStyles={stylingCount}
           preset={preset}
+          autoDownload={autoDownload}
+          onAutoDownloadDone={finishAutoDownload}
+          onSettings={onSettings}
           onRequireSignIn={() => setSignInPrompt("download")}
           sheetPhotos={photos.map((photo) => ({
             storedUrl: photo.storedUrl,
@@ -551,17 +842,20 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
         />
       ) : null}
 
-      <SignInPrompt
-        open={signInPrompt !== null}
-        title={
-          signInPrompt === "download"
-            ? "Sign in to download your sheet"
-            : signInPrompt === "ai"
-              ? "Sign in to use AI styles"
-              : "Sign in to add more photos"
-        }
-        onClose={() => setSignInPrompt(null)}
-      />
+      {signInPrompt ? (
+        <SignInPrompt
+          key={`${signInPrompt}-${googleNotice ?? "none"}`}
+          open
+          purpose={signInPrompt}
+          notice={googleNotice}
+          onClose={() => {
+            setSignInPrompt(null);
+            setGoogleNotice(null);
+          }}
+          onBeforeGoogle={persistForGoogle}
+          onSignedIn={handleSignedIn}
+        />
+      ) : null}
     </div>
   );
 }

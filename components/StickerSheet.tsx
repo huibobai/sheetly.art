@@ -1,7 +1,10 @@
 "use client";
+import { MakingProgress } from "@/components/MakingProgress";
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { isPermanentUser } from "@/lib/auth-user";
+import { SHEET_CUT_LINE } from "@/lib/copy";
 import {
   missingItemsColumn,
   missingStyleColumn,
@@ -12,16 +15,26 @@ import {
 } from "@/lib/sheets";
 import { isStickerStyle, styleLabel } from "@/lib/sticker-styles";
 import {
-  drawStickerSheet,
+  peekSheetBitmap,
+  pinSheetBitmap,
+  rememberSheetBitmap,
+  unpinSheetBitmap,
+} from "@/lib/sheet-bitmaps";
+import {
+  createDebouncedCallback,
+  drawStickerSheetAsync,
+  PREVIEW_DEBOUNCE_MS,
   pngBlobWithDpi,
   previewScale,
   SHEET_BACKGROUNDS,
   SHEET_COUNTS,
   SHEET_SIZES,
   sheetSizeLabel,
+  waitForNextPaint,
+  warmPrintDieCuts,
+  yieldToBrowser,
   type SheetBackground,
   type SheetCount,
-  type SheetImage,
   type SheetSize,
 } from "@/lib/sticker-sheet";
 import { createClient } from "@/lib/supabase/client";
@@ -77,11 +90,11 @@ async function loadSheetImage(url: string, signal: AbortSignal) {
     if (signal.aborted) {
       throw error;
     }
-    throw new Error("Could not load the artwork for this sheet.");
+    throw new Error("We couldn't load the artwork for this sheet.");
   }
 
   if (!response.ok) {
-    let detail = "Could not load the artwork for this sheet.";
+    let detail = "We couldn't load the artwork for this sheet.";
     try {
       const payload = (await response.json()) as { error?: string };
       if (payload.error) {
@@ -108,11 +121,49 @@ async function loadSheetImage(url: string, signal: AbortSignal) {
       await image.decode();
       return await createImageBitmap(image);
     } catch {
-      throw new Error("The saved artwork could not be read.");
+      throw new Error("We couldn't read the saved artwork.");
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
   }
+}
+
+function waitForIdle(signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    };
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(() => finish(), { timeout: 1200 });
+      signal.addEventListener(
+        "abort",
+        () => {
+          cancelIdleCallback(id);
+          finish();
+        },
+        { once: true },
+      );
+      return;
+    }
+    const id = window.setTimeout(finish, 200);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(id);
+        finish();
+      },
+      { once: true },
+    );
+  });
 }
 
 export function StickerSheet({
@@ -124,6 +175,9 @@ export function StickerSheet({
   preset,
   onRequireSignIn,
   sheetPhotos,
+  autoDownload = false,
+  onAutoDownloadDone,
+  onSettings,
 }: {
   artworks: string[];
   storedPhotoUrl: string | null;
@@ -133,19 +187,45 @@ export function StickerSheet({
   preset: SheetPreset | null;
   onRequireSignIn?: () => void;
   sheetPhotos: { storedUrl: string | null; style: string | null; displayUrl: string }[];
+  autoDownload?: boolean;
+  onAutoDownloadDone?: () => void;
+  onSettings?: (settings: { count: SheetCount; size: SheetSize; background: SheetBackground; padding: number }) => void;
 }) {
   const { user, loading } = useAuth();
+  const permanent = isPermanentUser(user);
+  const downloadRef = useRef<() => Promise<void>>(async () => undefined);
+  const autoStartedRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const bitmapCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
+  const pinnedUrlsRef = useRef<string[]>([]);
+  const previewDebounceRef = useRef(createDebouncedCallback(PREVIEW_DEBOUNCE_MS));
   const [count, setCount] = useState<SheetCount>(preset?.count ?? 9);
   const [size, setSize] = useState<SheetSize>(preset?.size ?? "a4");
   const [background, setBackground] = useState<SheetBackground>(preset?.background ?? "white");
   const [padding, setPadding] = useState(preset?.padding ?? 12);
+  const [preview, setPreview] = useState({ count, size, padding });
+  const [painted, setPainted] = useState({ count, size, padding });
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const lastSavedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    onSettings?.({ count, size, background, padding });
+  }, [count, size, background, padding, onSettings]);
+
+  useEffect(() => {
+    downloadRef.current = download;
+  });
+
+  useEffect(() => {
+    if (!autoDownload || autoStartedRef.current || loading || !permanent || !ready) {
+      return;
+    }
+    autoStartedRef.current = true;
+    onAutoDownloadDone?.();
+    void downloadRef.current();
+  }, [autoDownload, loading, permanent, ready, onAutoDownloadDone]);
 
   useEffect(() => {
     if (!preset) {
@@ -155,15 +235,25 @@ export function StickerSheet({
     setSize(preset.size);
     setBackground(preset.background);
     setPadding(preset.padding);
+    setPreview({ count: preset.count, size: preset.size, padding: preset.padding });
   }, [preset]);
 
   useEffect(() => {
-    const cache = bitmapCacheRef.current;
+    if (preview.count === count && preview.size === size && preview.padding === padding) {
+      return;
+    }
+    const gate = previewDebounceRef.current;
+    gate.schedule(() => setPreview({ count, size, padding }));
+    return () => gate.cancel();
+  }, [count, size, padding, preview]);
+
+  useEffect(() => {
+    const pinned = pinnedUrlsRef;
     return () => {
-      for (const bitmap of cache.values()) {
-        bitmap.close();
+      for (const url of pinned.current) {
+        unpinSheetBitmap(url);
       }
-      cache.clear();
+      pinned.current = [];
     };
   }, []);
 
@@ -190,7 +280,7 @@ export function StickerSheet({
 
   useEffect(() => {
     const items = savedItemsRef.current;
-    if (!user || !ready || !items || !savedKey || savedKey === lastSavedRef.current || savedKey === loadedKey) {
+    if (!permanent || !ready || !items || !savedKey || savedKey === lastSavedRef.current || savedKey === loadedKey) {
       return;
     }
 
@@ -262,86 +352,159 @@ export function StickerSheet({
             return;
           }
           lastSavedRef.current = snapshot;
-          setSaveNote(label ? `Saved the ${label} sheet.` : "Saved to My sheets.");
+          setSaveNote(label ? `Saved the ${label} sheet.` : "Saved. It's in My sheets.");
         });
     }, 800);
 
     return () => window.clearTimeout(timer);
-  }, [ready, user, savedKey, loadedKey]);
+  }, [ready, permanent, savedKey, loadedKey]);
   const backgroundLabel = SHEET_BACKGROUNDS.find((item) => item.id === background)?.label ?? "White";
   const sizeLabel = sheetSizeLabel(size);
 
   useEffect(() => {
     if (!artworkUrls.length) {
       if (preset) {
-        setError("This saved sheet is missing its image, so it can't be previewed or downloaded.");
+        setError("This saved sheet is missing its image, so we can't preview or download it.");
         setReady(false);
       }
       return;
     }
 
     const urls = artworkUrls;
+    const previewCount = preview.count;
+    const previewSize = preview.size;
+    const previewPadding = preview.padding;
     const controller = new AbortController();
     let cancelled = false;
 
+    function adopt(bitmaps: ImageBitmap[]) {
+      const canonical = bitmaps.map((bitmap, index) => rememberSheetBitmap(urls[index], bitmap));
+      const next = [...new Set(urls)];
+      const previous = new Set(pinnedUrlsRef.current);
+      for (const url of next) {
+        if (!previous.has(url)) {
+          pinSheetBitmap(url);
+        }
+      }
+      for (const url of pinnedUrlsRef.current) {
+        if (!next.includes(url)) {
+          unpinSheetBitmap(url);
+        }
+      }
+      pinnedUrlsRef.current = next;
+      return canonical;
+    }
+
     async function render() {
+      const fresh: ImageBitmap[] = [];
       try {
         setError(null);
-        const loaded: SheetImage[] = [];
-        for (const url of urls) {
-          let bitmap = bitmapCacheRef.current.get(url);
-          if (!bitmap) {
+        const settled = await Promise.allSettled(
+          urls.map(async (url) => {
+            const cached = peekSheetBitmap(url);
+            if (cached) {
+              return { bitmap: cached, fresh: false };
+            }
             try {
-              bitmap = await loadSheetImage(url, controller.signal);
+              const bitmap = await loadSheetImage(url, controller.signal);
+              fresh.push(bitmap);
+              return { bitmap, fresh: true };
             } catch (error) {
               if (cancelled || controller.signal.aborted) {
-                return;
+                throw error;
               }
-              bitmap = await loadSheetImage(url, controller.signal);
+              const bitmap = await loadSheetImage(url, controller.signal);
+              fresh.push(bitmap);
+              return { bitmap, fresh: true };
             }
-            if (cancelled) {
+          }),
+        );
+        if (cancelled || controller.signal.aborted) {
+          for (const bitmap of fresh) {
+            if (!urls.some((url) => peekSheetBitmap(url) === bitmap)) {
               bitmap.close();
-              return;
             }
-            bitmapCacheRef.current.set(url, bitmap);
           }
-          loaded.push(bitmap);
+          return;
+        }
+        const rejected = settled.find((item) => item.status === "rejected");
+        if (rejected && rejected.status === "rejected") {
+          for (const bitmap of fresh) {
+            if (!urls.some((url) => peekSheetBitmap(url) === bitmap)) {
+              bitmap.close();
+            }
+          }
+          throw rejected.reason;
+        }
+        const loaded: ImageBitmap[] = [];
+        for (const item of settled) {
+          if (item.status === "fulfilled") {
+            loaded.push(item.value.bitmap);
+          }
+        }
+        const artwork = adopt(loaded);
+
+        const offscreen = document.createElement("canvas");
+        const offscreenContext = offscreen.getContext("2d");
+        if (!offscreenContext) {
+          throw new Error("The sheet preview isn't on the page yet.");
         }
 
-        const keep = new Set(urls);
-        for (const [url, bitmap] of bitmapCacheRef.current) {
-          if (!keep.has(url)) {
-            bitmap.close();
-            bitmapCacheRef.current.delete(url);
-          }
+        await drawStickerSheetAsync(offscreenContext, artwork, {
+          count: previewCount,
+          size: previewSize,
+          background,
+          padding: previewPadding / 100,
+          scale: previewScale(previewSize),
+        }, {
+          signal: controller.signal,
+          afterSticker: () => yieldToBrowser(),
+        });
+        if (cancelled || controller.signal.aborted) {
+          return;
         }
 
         const canvas = canvasRef.current;
         const context = canvas?.getContext("2d");
         if (!canvas || !context) {
-          throw new Error("The sheet preview is not on the page yet.");
+          throw new Error("The sheet preview isn't on the page yet.");
         }
+        canvas.width = offscreen.width;
+        canvas.height = offscreen.height;
+        context.drawImage(offscreen, 0, 0);
+        setReady(true);
+        setError(null);
+        setPainted({ count: previewCount, size: previewSize, padding: previewPadding });
 
-        drawStickerSheet(context, loaded, {
-          count,
-          size,
-          background,
-          padding: padding / 100,
-          scale: previewScale(size),
-        });
-        if (!cancelled) {
-          setReady(true);
-          setError(null);
-        }
+        void (async () => {
+          await waitForIdle(controller.signal);
+          if (cancelled || controller.signal.aborted) {
+            return;
+          }
+          try {
+            await warmPrintDieCuts(artwork, {
+              count: previewCount,
+              size: previewSize,
+              padding: previewPadding / 100,
+            }, {
+              signal: controller.signal,
+              afterSticker: () => waitForIdle(controller.signal),
+            });
+          } catch (error) {
+            if (!cancelled && !controller.signal.aborted && !(error instanceof Error && error.name === "AbortError")) {
+              console.error("[sheet] print preview", error);
+            }
+          }
+        })();
       } catch (error) {
-        if (cancelled || controller.signal.aborted) {
+        if (cancelled || controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
           return;
         }
         setReady(false);
         setError(
           error instanceof Error && error.message
             ? error.message
-            : "Could not build the sticker sheet.",
+            : "We couldn't build the sticker sheet.",
         );
       }
     }
@@ -353,20 +516,26 @@ export function StickerSheet({
       controller.abort();
     };
     // artworkKey is the joined artwork URL list, so the preview reloads when a design is added or removed.
+    // Count, size, and border are debounced through `preview` so the slider can move without a rebuild per tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artworkKey, count, size, background, padding, preset]);
+  }, [artworkKey, preview, background, preset]);
 
   async function download() {
-    if (!user) {
+    if (!isPermanentUser(user)) {
+      onRequireSignIn?.();
+      return;
+    }
+    const gate = await fetch("/api/download-auth", { method: "POST" });
+    if (!gate.ok) {
       onRequireSignIn?.();
       return;
     }
 
-    const bitmaps = artworkUrls.map((url) => bitmapCacheRef.current.get(url));
+    const bitmaps = artworkUrls.map((url) => peekSheetBitmap(url));
     if (!ready || bitmaps.some((bitmap) => !bitmap)) {
       setError(
         imageUrl
-          ? "The sheet is not ready to download yet."
+          ? "The sheet isn't ready to download yet."
           : "This sheet has no artwork to download.",
       );
       return;
@@ -374,28 +543,34 @@ export function StickerSheet({
 
     setDownloading(true);
     setError(null);
+    await waitForNextPaint();
     try {
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
       if (!context) {
-        setError("Could not create the PNG. Open the sheet again and retry the download.");
+        setError("We couldn't create the PNG. Open the sheet again and try the download once more.");
         return;
       }
 
-      drawStickerSheet(context, bitmaps.filter((bitmap): bitmap is ImageBitmap => Boolean(bitmap)), {
-        count,
-        size,
-        background,
-        padding: padding / 100,
-        scale: 1,
-      });
+      await drawStickerSheetAsync(
+        context,
+        bitmaps.filter((bitmap): bitmap is ImageBitmap => Boolean(bitmap)),
+        {
+          count,
+          size,
+          background,
+          padding: padding / 100,
+          scale: 1,
+        },
+        { afterSticker: () => yieldToBrowser() },
+      );
       console.log("[sheet] download canvas", canvas.width, canvas.height);
 
       const blob = await new Promise<Blob | null>((resolve) => {
         canvas.toBlob(resolve, "image/png");
       });
       if (!blob) {
-        setError("Could not create the PNG. Open the sheet again and retry the download.");
+        setError("We couldn't create the PNG. Open the sheet again and try the download once more.");
         return;
       }
 
@@ -412,12 +587,7 @@ export function StickerSheet({
   }
 
   const photoCount = artworkUrls.length;
-  const sheetNote =
-    photoCount <= 1
-      ? "This photo repeats as a die-cut sticker. Dashed lines follow the white edge."
-      : photoCount >= count
-        ? "Each photo is its own die-cut sticker. Dashed lines follow the white edge."
-        : "Photos fill the sheet in order, then repeat. Dashed lines follow the white edge.";
+  const sheetNote = SHEET_CUT_LINE;
   const summaryParts = [
     `${count} stickers`,
     photoCount > 1 ? `${photoCount} photos` : null,
@@ -426,29 +596,32 @@ export function StickerSheet({
     photoCount === 1 && styleForRow ? styleLabel(styleForRow) : null,
     "300 DPI",
   ].filter((part): part is string => Boolean(part));
+  const controlsPending = painted.count !== count || painted.size !== size || painted.padding !== padding;
   const summary = !ready
-    ? "Preparing your sheet…"
-    : pendingStyles > 0
-      ? `Updating ${pendingStyles === 1 ? "1 style" : `${pendingStyles} styles`}…`
-      : summaryParts.join(" · ");
+    ? "Putting your sheet together…"
+    : controlsPending
+      ? "Updating the preview…"
+      : pendingStyles > 0
+        ? `Styling ${pendingStyles === 1 ? "1 photo" : `${pendingStyles} photos`}…`
+        : summaryParts.join(" · ");
 
   return (
-    <section className="rounded-3xl border border-border bg-surface p-5 shadow-sm sm:p-7">
-      <h2 className="text-lg font-semibold tracking-tight">Sticker sheet</h2>
+    <section className="sticker-panel p-5 sm:p-7">
+      <h2 className="font-display text-xl font-bold tracking-tight"><span className="step-dot">2</span> Your sticker sheet</h2>
       <p className="mt-1 text-sm leading-6 text-muted">
-        Choose a size and how many stickers. The preview updates as styles finish.
+        Pick a size and how many. Your sheet shows up right away and gets its new look the moment it&apos;s ready.
       </p>
       {!imageUrl ? (
         <div className="mt-5 rounded-2xl border border-dashed border-border bg-stone-50 px-6 py-14 text-center">
           <p className="text-sm font-medium">Your preview will show up here</p>
-          <p className="mt-1 text-sm text-muted">Upload a photo to start the sheet.</p>
+          <p className="mt-1 text-sm text-muted">Add a photo to start the sheet.</p>
         </div>
       ) : (
         <div className="mt-5 space-y-5">
           <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
             <div className="space-y-5">
               <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">How many</legend>
+                <legend className="text-sm font-medium">How many stickers</legend>
                 <div className="grid grid-cols-4 gap-2">
                   {SHEET_COUNTS.map((option) => (
                     <button
@@ -458,7 +631,7 @@ export function StickerSheet({
                       onClick={() => setCount(option)}
                       className={`rounded-xl border px-3 py-2 text-sm font-medium ${
                         count === option
-                          ? "border-accent bg-orange-50 text-accent"
+                          ? "border-accent bg-accent-soft text-accent"
                           : "border-border bg-white hover:border-stone-300"
                       }`}
                     >
@@ -479,7 +652,7 @@ export function StickerSheet({
                       onClick={() => setSize(option.id)}
                       className={`rounded-xl border px-3 py-2 text-sm font-medium ${
                         size === option.id
-                          ? "border-accent bg-orange-50 text-accent"
+                          ? "border-accent bg-accent-soft text-accent"
                           : "border-border bg-white hover:border-stone-300"
                       }`}
                     >
@@ -529,14 +702,14 @@ export function StickerSheet({
                   aria-valuenow={padding}
                   aria-label="Sticker border"
                   onChange={(event) => setPadding(Number(event.target.value))}
-                  className="w-full accent-orange-600"
+                  className="w-full accent-[var(--accent)]"
                 />
               </label>
             </div>
 
             <div className="space-y-3">
               <div
-                className={`mx-auto overflow-hidden rounded-2xl border border-border ${
+                className={`relative mx-auto overflow-hidden rounded-2xl border border-border ${
                   size === "square" ? "max-w-lg" : "max-w-sm"
                 } ${background === "transparent" ? "sheet-checker" : "bg-white"}`}
               >
@@ -546,6 +719,7 @@ export function StickerSheet({
                   aria-label={`${count} stickers on a ${sizeLabel} sheet`}
                   className="h-auto w-full"
                 />
+                {pendingStyles > 0 ? <MakingProgress count={pendingStyles} variant="overlay" /> : null}
               </div>
               <p className="text-center text-sm text-muted">{sheetNote}</p>
             </div>
@@ -554,10 +728,10 @@ export function StickerSheet({
           <button
             type="button"
             onClick={() => void download()}
-            disabled={Boolean(user) && (loading || !ready || downloading)}
-            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={downloading || (permanent && (loading || !ready))}
+            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {downloading ? "Preparing print file…" : "Download sticker sheet"}
+            {downloading ? "Getting the print file ready…" : "Download my sheet"}
           </button>
           {error ? (
             <p role="alert" className="text-center text-sm text-red-600">
@@ -568,7 +742,7 @@ export function StickerSheet({
               <p className="text-sm text-muted" role="status">
                 {summary}
               </p>
-              {user && saveNote ? (
+              {permanent && saveNote ? (
                 <p
                   role={saveNote.startsWith("Couldn't") ? "alert" : "status"}
                   className={`text-sm ${saveNote.startsWith("Couldn't") ? "text-red-600" : "text-muted"}`}
@@ -576,8 +750,8 @@ export function StickerSheet({
                   {saveNote}
                 </p>
               ) : null}
-              {!loading && !user ? (
-                <p className="text-sm text-muted">Sign in to download this sheet or add more photos.</p>
+              {!loading && !permanent ? (
+                <p className="text-sm text-muted">Free to try. We only ask you to sign in when you download, and your photos stay put.</p>
               ) : null}
             </div>
           )}
