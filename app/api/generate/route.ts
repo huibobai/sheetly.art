@@ -1,6 +1,7 @@
 import { fal } from "@fal-ai/client";
 import { connection } from "next/server";
-import { interpretQuotaResult, quotaLimitsFromEnv, quotaMessage } from "@/lib/generation-quota";
+import { resolveGuestIp } from "@/lib/client-ip";
+import { isGuestDailyCap, interpretQuotaResult, quotaLimitsFromEnv, quotaMessage, quotaRpcArgs, GUEST_LIMIT_CODE } from "@/lib/generation-quota";
 import { generateSourceFor, isFalMediaHost, type StorageRef } from "@/lib/image-source";
 import { isStickerStyle, STYLE_PROMPTS } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/server";
@@ -8,11 +9,15 @@ import { supabaseUrl } from "@/lib/supabase/env";
 
 export const maxDuration = 60;
 
+// Dublin, next to Supabase. Next.js 16 still forwards this export and warns that it is deprecated.
+// vercel.json also sets this route's region, which is what Vercel uses for Node.js functions.
+export const preferredRegion = "dub1";
+
 /** fal fetches the photo through this signed URL, so it only needs to live for one generation. */
 const SIGNED_URL_SECONDS = 600;
 
-const GENERIC_ERROR = "Could not style this photo. Please try again.";
-const UNAVAILABLE_ERROR = "AI styles are unavailable right now. Please try again later, or use the Photo style.";
+const GENERIC_ERROR = "We couldn't style this photo. Please try again.";
+const UNAVAILABLE_ERROR = "AI styles aren't available right now. Please try again later, or use the Photo style.";
 
 type GenerateBody = {
   imageUrl?: unknown;
@@ -55,7 +60,9 @@ async function urlForFal(
 export async function POST(request: Request) {
   await connection();
 
-  // 1. Signed-in users only. Guests can preview with the Photo style, which never calls this route.
+  // 1. A session is required. Anonymous guests count: they are authenticated users
+  // with is_anonymous true, and the quota function gives them the guest caps.
+  // A visitor with no session at all still has to sign in.
   const supabase = await createClient();
   const {
     data: { user },
@@ -63,12 +70,13 @@ export async function POST(request: Request) {
   if (!user) {
     return json({ error: "Sign in to use AI styles.", code: "auth_required" }, 401);
   }
+  const anonymous = user.is_anonymous === true;
 
   let body: GenerateBody;
   try {
     body = (await request.json()) as GenerateBody;
   } catch {
-    return json({ error: "Choose an uploaded photo and a sticker style." }, 400);
+    return json({ error: "Pick an uploaded photo and a sticker style." }, 400);
   }
 
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
@@ -77,7 +85,7 @@ export async function POST(request: Request) {
   // 2. Only this project's storage: the caller's own private upload, or a legacy public upload.
   const source = imageUrl ? generateSourceFor(imageUrl, supabaseUrl(), user.id) : null;
   if (!source || !isStickerStyle(style)) {
-    return json({ error: "Choose an uploaded photo and a sticker style." }, 400);
+    return json({ error: "Pick an uploaded photo and a sticker style." }, 400);
   }
 
   const falKey = process.env.FAL_KEY;
@@ -86,18 +94,26 @@ export async function POST(request: Request) {
     return json({ error: UNAVAILABLE_ERROR }, 503);
   }
 
-  // 3. Short-lived URL fal can fetch (signed before the quota so a missing photo costs nothing).
-  const falImageUrl = await urlForFal(supabase, source);
+  // 3. Sign a short-lived URL and check the quota together. The URL is not saved.
+  // The quota function runs once. If it says no, we stop before fal.
+  // A missing photo is still a 400, checked before the quota result.
+  // Because these run together, a missing photo can use one quota slot. It does not call fal.
+  const limits = quotaLimitsFromEnv(process.env);
+  // Signed-in calls pass a null IP. The SQL function also ignores IP caps unless
+  // the JWT says is_anonymous, so a guest cannot be given the signed-in daily cap
+  // by omitting the guest argument, and a missing IP fails closed for guests.
+  const guestIp = anonymous ? resolveGuestIp(request.headers, process.env.NODE_ENV) : null;
+  const [falImageUrl, quotaResult] = await Promise.all([
+    urlForFal(supabase, source),
+    supabase.rpc("consume_generation_quota", quotaRpcArgs(anonymous, limits, guestIp)),
+  ]);
   if (!falImageUrl) {
-    return json({ error: "That photo could not be found. Remove it and add it again." }, 400);
+    return json({ error: "We can't find that photo. Remove it and add it again." }, 400);
   }
 
-  // 4. Per-user quota (rolling minute + rolling 24 h), counted in the database.
-  const limits = quotaLimitsFromEnv(process.env);
-  const { data: quotaData, error: quotaError } = await supabase.rpc("consume_generation_quota", {
-    p_daily_limit: limits.perDay,
-    p_minute_limit: limits.perMinute,
-  });
+  // 4. Quota (rolling minute + rolling 24 h), counted in the database.
+  // Guests also hit per-IP caps. Signed-in limits are the same numbers as before.
+  const { data: quotaData, error: quotaError } = quotaResult;
   if (quotaError) {
     console.error("generate: quota check failed", quotaError.message);
   }
@@ -106,8 +122,13 @@ export async function POST(request: Request) {
     if (decision.reason === "unavailable") {
       return json({ error: UNAVAILABLE_ERROR }, 503);
     }
+    const code = isGuestDailyCap(decision.reason)
+      ? GUEST_LIMIT_CODE
+      : decision.reason === "daily"
+        ? "daily_limit"
+        : "rate_limited";
     return json(
-      { error: quotaMessage(decision), code: decision.reason === "minute" ? "rate_limited" : "daily_limit" },
+      { error: quotaMessage(decision), code },
       429,
       { "Retry-After": String(decision.retryAfterSeconds) },
     );
@@ -130,6 +151,9 @@ export async function POST(request: Request) {
       // X-Fal-Object-Lifecycle-Preference is intentionally NOT set yet: saved sheets still point at the
       // fal CDN URL, so a short expiry would break them. Set it once results are copied to our own bucket.
       headers: { "X-Fal-Store-IO": "0" },
+      // Poll the queue every 200 ms instead of the client default of 500 ms, so a finished
+      // image is picked up sooner (about 150 ms saved on average, same model and inputs).
+      pollInterval: 200,
     });
 
     const generatedUrl = result.data.images[0]?.url;

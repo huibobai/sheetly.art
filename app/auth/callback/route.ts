@@ -31,5 +31,12 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL("/?auth=error", origin));
+  // linkIdentity and Google sign-in land here when the provider refuses.
+  // The anonymous session is left in place because we never exchanged a code.
+  const errorCode = (url.searchParams.get("error_code") ?? url.searchParams.get("error") ?? "").toLowerCase();
+  const auth =
+    errorCode.includes("identity_already") ? "google-taken"
+    : errorCode.includes("manual_linking") ? "linking-off"
+    : "error";
+  return NextResponse.redirect(new URL(`/?auth=${auth}`, origin));
 }

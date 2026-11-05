@@ -3,54 +3,30 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { SignInPrompt } from "@/components/SignInPrompt";
 import { useAuth } from "@/components/AuthProvider";
-
-export function GoogleSignInButton({ fullWidth = false }: { fullWidth?: boolean }) {
-  const { signInWithGoogle } = useAuth();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function start() {
-    setPending(true);
-    setError(null);
-    const result = await signInWithGoogle();
-    if (result) {
-      setPending(false);
-      setError(result);
-    }
-  }
-
-  return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        onClick={() => void start()}
-        disabled={pending}
-        className={`rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:opacity-50 ${
-          fullWidth ? "w-full" : ""
-        }`}
-      >
-        {pending ? "Redirecting…" : "Sign in with Google"}
-      </button>
-      {error ? (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
-}
+import { isPermanentUser } from "@/lib/auth-user";
+import type { SignInPurpose } from "@/lib/sign-in-flow";
 
 export function AuthControls() {
   const { user, loading, signOut } = useAuth();
   const searchParams = useSearchParams();
-  const authError = searchParams.get("auth") === "error";
+  const auth = searchParams.get("auth");
+  const authError = auth === "error";
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [purpose, setPurpose] = useState<SignInPurpose>("header");
+  const permanent = isPermanentUser(user);
+
+  function openSignIn(next: SignInPurpose) {
+    setPurpose(next);
+    setSignInOpen(true);
+  }
 
   if (loading) {
     return <p className="text-sm text-muted">…</p>;
   }
 
-  if (user) {
+  if (permanent && user) {
     return (
       <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
         <p className="max-w-48 truncate text-sm text-muted">{user.email}</p>
@@ -66,11 +42,33 @@ export function AuthControls() {
 
   return (
     <div className="ml-auto flex flex-col items-end gap-2">
-      <GoogleSignInButton />
+      <div className="flex items-center gap-4">
+        <button type="button" onClick={() => openSignIn("save")} className="text-sm font-medium">
+          My sheets
+        </button>
+        <button
+          type="button"
+          onClick={() => openSignIn("header")}
+          aria-haspopup="dialog"
+          aria-expanded={signInOpen}
+          className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
+        >
+          Sign in
+        </button>
+      </div>
       {authError ? (
         <p role="alert" className="text-sm text-red-600">
-          That sign-in didn&apos;t work. Try again.
+          That sign-in didn&apos;t work. Please try again.
         </p>
+      ) : null}
+      {signInOpen ? (
+        <SignInPrompt
+          key={purpose}
+          open
+          purpose={purpose}
+          onClose={() => setSignInOpen(false)}
+          onSignedIn={() => setSignInOpen(false)}
+        />
       ) : null}
     </div>
   );
