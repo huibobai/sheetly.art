@@ -151,6 +151,9 @@ export async function POST(request: Request) {
       // X-Fal-Object-Lifecycle-Preference is intentionally NOT set yet: saved sheets still point at the
       // fal CDN URL, so a short expiry would break them. Set it once results are copied to our own bucket.
       headers: { "X-Fal-Store-IO": "0" },
+      // Poll the queue every 200 ms instead of the client default of 500 ms, so a finished
+      // image is picked up sooner (about 150 ms saved on average, same model and inputs).
+      pollInterval: 200,
     });
 
     const generatedUrl = result.data.images[0]?.url;

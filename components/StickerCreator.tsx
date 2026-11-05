@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { MakingProgress } from "@/components/MakingProgress";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { PHOTO_UPLOAD_INPUT_ID } from "@/components/UploadLink";
 import { SignInPrompt, type SignedInResult } from "@/components/SignInPrompt";
@@ -44,58 +45,6 @@ type SheetPhoto = {
 };
 
 const LOCAL_ONLY_AI_ERROR = "This photo stayed on this device. Remove it and add it again to use AI styles.";
-
-const STYLE_PROGRESS_MESSAGES = [
-  "Warming up the pencils…",
-  "Tracing the outline…",
-  "Filling in the colors…",
-  "Cutting the white border…",
-  "Almost ready to peel…",
-];
-
-function subscribeReducedMotion(onStoreChange: () => void) {
-  const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-  media.addEventListener("change", onStoreChange);
-  return () => media.removeEventListener("change", onStoreChange);
-}
-
-function prefersReducedMotion() {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-function StyleProgressCard({ count }: { count: number }) {
-  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => false);
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    if (reducedMotion) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setIndex((current) => (current + 1) % STYLE_PROGRESS_MESSAGES.length);
-    }, 3200);
-    return () => window.clearInterval(timer);
-  }, [reducedMotion]);
-
-  const message = reducedMotion
-    ? "Hang tight. This usually takes a few seconds."
-    : STYLE_PROGRESS_MESSAGES[index];
-
-  return (
-    <div role="status" aria-live="polite" aria-atomic="true" className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3">
-      <div className="flex items-center gap-3">
-        <span
-          aria-hidden="true"
-          className="h-5 w-5 shrink-0 rounded-full border-2 border-orange-200 border-t-accent motion-safe:animate-spin"
-        />
-        <div>
-          <p className="text-sm font-semibold">{count > 1 ? `Styling ${count} photos` : "Styling your photo"}</p>
-          <p className="text-sm text-stone-700">{message}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 async function requestStyledImage(
   imageUrl: string,
@@ -172,7 +121,7 @@ function StyleChoices({
                 onChange(option.id);
               }}
               className={`rounded-xl border p-1.5 text-center disabled:cursor-not-allowed disabled:opacity-60 ${
-                selected ? "border-accent bg-orange-50 ring-2 ring-orange-100" : "border-border bg-white hover:border-stone-300"
+                selected ? "border-accent bg-accent-soft ring-2 ring-accent-soft" : "border-border bg-white hover:border-stone-300"
               }`}
             >
               {option.image ? (
@@ -748,10 +697,10 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       <section
         id="upload"
         tabIndex={-1}
-        className="scroll-mt-6 rounded-3xl border border-border bg-surface p-5 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-7"
+        className="sticker-panel scroll-mt-6 p-5 outline-none focus-visible:ring-2 focus-visible:ring-accent sm:p-7"
       >
-        <h2 className="text-lg font-semibold tracking-tight">Your photos</h2>
-        <p className="mt-1 text-sm leading-6 text-muted">Add one photo or a few. Pick a photo, then choose its style.</p>
+        <h2 className="font-display text-xl font-bold tracking-tight"><span className="step-dot">1</span> Your photos</h2>
+        <p className="mt-1 text-sm leading-6 text-muted">One photo or a bunch. Tap one, then pick its look.</p>
         <p className="mt-2 text-sm leading-6 text-muted">{PRIVACY_NOTICE}</p>
         <div className="mt-5">
           {photos.length === 0 ? (
@@ -783,7 +732,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                         }}
                         className={`w-full rounded-2xl border p-1.5 text-center ${
                           active
-                            ? "border-accent bg-orange-50 ring-2 ring-orange-100"
+                            ? "border-accent bg-accent-soft ring-2 ring-accent-soft"
                             : "border-border bg-white hover:border-stone-300"
                         }`}
                       >
@@ -815,7 +764,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               </ul>
               {selected ? (
                 <div className="space-y-3">
-                  {stylingCount > 0 ? <StyleProgressCard count={stylingCount} /> : null}
+                  {stylingCount > 0 ? <MakingProgress count={stylingCount} /> : null}
                   <StyleChoices
                     label={`Style for photo ${selectedIndex + 1}`}
                     value={selected.style ?? "photo"}
@@ -858,14 +807,14 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       </section>
 
       {guestLimit ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent-line bg-accent-soft px-4 py-3">
           <p role="status" className="text-sm font-medium">
             {GUEST_LIMIT_MESSAGE}
           </p>
           <button
             type="button"
             onClick={() => setSignInPrompt("limit")}
-            className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+            className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong"
           >
             Sign in
           </button>
