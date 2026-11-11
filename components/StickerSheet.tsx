@@ -2,9 +2,11 @@
 import { MakingProgress } from "@/components/MakingProgress";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { isPermanentUser } from "@/lib/auth-user";
 import { SHEET_CUT_LINE } from "@/lib/copy";
+import { reportContentHref } from "@/lib/legal";
 import {
   missingItemsColumn,
   missingStyleColumn,
@@ -208,6 +210,7 @@ export function StickerSheet({
   const [error, setError] = useState<string | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [savedSheetId, setSavedSheetId] = useState<string | null>(null);
   const lastSavedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -290,6 +293,9 @@ export function StickerSheet({
     const label = items.length === 1 ? styleLabel(first.style) : null;
     const timer = window.setTimeout(() => {
       const supabase = createClient();
+      // review_status, reviewed_at, and reviewed_by are intentionally omitted.
+      // No sheet may be sent to print unless review_status = 'approved'.
+      // Callers cannot set those columns (see the review migration).
       const row = {
         source_image_url: first.imageUrl,
         photo_url: first.photoUrl,
@@ -306,7 +312,10 @@ export function StickerSheet({
       void supabase
         .from("sheets")
         .insert(row)
-        .then(async ({ error: saveError }) => {
+        .select("id")
+        .maybeSingle()
+        .then(async ({ data: inserted, error: saveError }) => {
+          let savedId = inserted?.id ?? null;
           let payload: {
             source_image_url: string;
             photo_url: string;
@@ -323,19 +332,22 @@ export function StickerSheet({
           if (error && missingItemsColumn(error)) {
             const { items: _items, ...withoutItems } = payload;
             payload = withoutItems;
-            const retry = await supabase.from("sheets").insert(payload);
+            const retry = await supabase.from("sheets").insert(payload).select("id").maybeSingle();
             error = retry.error;
+            savedId = retry.data?.id ?? null;
           }
           if (error && missingStyleColumn(error)) {
             const { style: _style, ...withoutStyle } = payload;
             payload = withoutStyle;
-            const retry = await supabase.from("sheets").insert(payload);
+            const retry = await supabase.from("sheets").insert(payload).select("id").maybeSingle();
             error = retry.error;
+            savedId = retry.data?.id ?? null;
           }
           if (error && missingItemsColumn(error) && "items" in payload) {
             const { items: _items, ...withoutItems } = payload;
-            const retry = await supabase.from("sheets").insert(withoutItems);
+            const retry = await supabase.from("sheets").insert(withoutItems).select("id").maybeSingle();
             error = retry.error;
+            savedId = retry.data?.id ?? null;
           }
           if (error) {
             console.error("[sheets] save failed", {
@@ -352,6 +364,9 @@ export function StickerSheet({
             return;
           }
           lastSavedRef.current = snapshot;
+          if (typeof savedId === "string") {
+            setSavedSheetId(savedId);
+          }
           setSaveNote(label ? `Saved the ${label} sheet.` : "Saved. It's in My sheets.");
         });
     }, 800);
@@ -733,6 +748,14 @@ export function StickerSheet({
           >
             {downloading ? "Getting the print file ready…" : "Download my sheet"}
           </button>
+          <p className="text-center text-sm">
+            <Link
+              href={reportContentHref(savedSheetId ?? preset?.id)}
+              className="font-medium underline decoration-accent-line underline-offset-2 hover:decoration-accent"
+            >
+              Report this content
+            </Link>
+          </p>
           {error ? (
             <p role="alert" className="text-center text-sm text-red-600">
               {error}

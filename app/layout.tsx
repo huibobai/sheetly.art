@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fredoka, Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
 import { Header } from "@/components/Header";
+import { SiteFooter } from "@/components/SiteFooter";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <main className="mx-auto w-full max-w-5xl px-4 pb-16 pt-8 sm:px-6 lg:px-8">
             {children}
           </main>
+          <SiteFooter />
         </AuthProvider>
       </body>
     </html>

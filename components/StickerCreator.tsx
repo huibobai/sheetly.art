@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { MakingProgress } from "@/components/MakingProgress";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import { RightsConfirm } from "@/components/RightsConfirm";
 import { PHOTO_UPLOAD_INPUT_ID } from "@/components/UploadLink";
 import { SignInPrompt, type SignedInResult } from "@/components/SignInPrompt";
 import { StickerSheet } from "@/components/StickerSheet";
 import type { GoogleLinkFallback } from "@/lib/auth-errors";
 import { isAnonymousUser, isPermanentUser } from "@/lib/auth-user";
 import { PRIVACY_NOTICE } from "@/lib/copy";
+import { rightsConfirmedServerSnapshot, rightsConfirmedSnapshot, subscribeRightsConfirmed, writeRightsConfirmed } from "@/lib/legal";
 import { GUEST_LIMIT_CODE, GUEST_LIMIT_MESSAGE } from "@/lib/generation-quota";
 import { rewriteStorageOwner } from "@/lib/guest-migrate";
 import { displaySrc } from "@/lib/image-source";
@@ -49,11 +51,12 @@ const LOCAL_ONLY_AI_ERROR = "This photo stayed on this device. Remove it and add
 async function requestStyledImage(
   imageUrl: string,
   style: StickerStyle,
+  rightsConfirmed: boolean,
 ): Promise<{ imageUrl?: string; error?: string; limitReached?: boolean; needsRetry?: boolean }> {
   const response = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageUrl, style }),
+    body: JSON.stringify({ imageUrl, style, rightsConfirmed }),
   });
   let payload: { imageUrl?: string; error?: string; code?: string } = {};
   try {
@@ -89,12 +92,16 @@ function StyleChoices({
   label,
   photoUrl,
   disabled = false,
+  rightsConfirmed,
+  hintId,
 }: {
   value: string;
   onChange: (value: string) => void;
   label: string;
   photoUrl?: string | null;
   disabled?: boolean;
+  rightsConfirmed: boolean;
+  hintId: string;
 }) {
   const options: { id: string; name: string; image: string | null }[] = [
     { id: "photo", name: "Photo", image: photoUrl ?? null },
@@ -102,20 +109,25 @@ function StyleChoices({
   ];
 
   return (
-    <fieldset className="space-y-2" aria-busy={disabled || undefined}>
+    <fieldset
+      className="space-y-2"
+      aria-busy={disabled || undefined}
+      aria-describedby={rightsConfirmed ? undefined : hintId}
+    >
       <legend className="text-sm font-medium">{label}</legend>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
         {options.map((option) => {
           const selected = value === option.id;
           const isStyleThumb = option.id !== "photo";
+          const locked = disabled || (isStyleThumb && !rightsConfirmed);
           return (
             <button
               key={option.id}
               type="button"
               aria-pressed={selected}
-              disabled={disabled}
+              disabled={locked}
               onClick={() => {
-                if (disabled) {
+                if (locked) {
                   return;
                 }
                 onChange(option.id);
@@ -150,6 +162,12 @@ function StyleChoices({
 export function StickerCreator({ initialSheetId }: { initialSheetId: string | null }) {
   const { user, loading, ensureAnonymousSession } = useAuth();
   const [photos, setPhotos] = useState<SheetPhoto[]>([]);
+  const rightsConfirmed = useSyncExternalStore(
+    subscribeRightsConfirmed,
+    rightsConfirmedSnapshot,
+    rightsConfirmedServerSnapshot,
+  );
+  const rightsHintId = useId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preset, setPreset] = useState<SheetPreset | null>(null);
   const [restoreNote, setRestoreNote] = useState<string | null>(null);
@@ -180,6 +198,14 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       mountedRef.current = false;
     };
   }, []);
+
+  function onRightsConfirmed(checked: boolean) {
+    try {
+      writeRightsConfirmed(window.sessionStorage, checked);
+    } catch {
+      // Storage can throw in private mode. The box stays as it was.
+    }
+  }
 
   useEffect(() => {
     const ids = photos.map((photo) => photo.id);
@@ -428,7 +454,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   useEffect(() => {
     for (const photo of photos) {
       const style = photo.style;
-      if (!style || !photo.storedUrl || photo.uploadFailed || photo.localOnly || photo.results[style]) {
+      if (!style || !rightsConfirmed || !photo.storedUrl || photo.uploadFailed || photo.localOnly || photo.results[style]) {
         continue;
       }
       const key = `${photo.id}:${style}`;
@@ -440,11 +466,11 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       const storedUrl = photo.storedUrl;
       void (async () => {
         try {
-          let payload = await requestStyledImage(storedUrl, style);
+          let payload = await requestStyledImage(storedUrl, style, true);
           if (!payload.imageUrl && payload.needsRetry) {
             const session = await ensureRef.current();
             if (session.ok) {
-              payload = await requestStyledImage(storedUrl, style);
+              payload = await requestStyledImage(storedUrl, style, true);
             }
           }
           if (!payload.imageUrl) {
@@ -489,7 +515,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
     if (inflightRef.current.size === 0) {
       styleRunLockRef.current = false;
     }
-  }, [photos]);
+  }, [photos, rightsConfirmed]);
 
   async function prepareSession() {
     try {
@@ -565,12 +591,15 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       return;
     }
     const style = isStickerStyle(value) ? value : null;
+    if (style && !rightsConfirmed) {
+      return;
+    }
     if (style) {
       failedRef.current.delete(`${id}:${style}`);
     }
     const photo = photos.find((item) => item.id === id);
     const willRun = Boolean(
-      style && photo?.storedUrl && !photo.uploadFailed && !photo.localOnly && !photo.results[style],
+      style && rightsConfirmed && photo?.storedUrl && !photo.uploadFailed && !photo.localOnly && !photo.results[style],
     );
     if (willRun) {
       styleRunLockRef.current = true;
@@ -593,8 +622,12 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       return;
     }
     const style = isStickerStyle(value) ? value : null;
+    if (style && !rightsConfirmed) {
+      return;
+    }
     const willRun = Boolean(
       style &&
+        rightsConfirmed &&
         photos.some((photo) => photo.storedUrl && !photo.uploadFailed && !photo.localOnly && !photo.results[style]),
     );
     if (willRun) {
@@ -765,18 +798,22 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
               {selected ? (
                 <div className="space-y-3">
                   {stylingCount > 0 ? <MakingProgress count={stylingCount} /> : null}
+                  <RightsConfirm checked={rightsConfirmed} hintId={rightsHintId} onChange={onRightsConfirmed} />
+                  <p className="text-sm leading-6 text-muted">Please don&apos;t upload characters, logos or celebrities.</p>
                   <StyleChoices
                     label={`Style for photo ${selectedIndex + 1}`}
                     value={selected.style ?? "photo"}
                     photoUrl={displaySrc(selected.previewUrl)}
                     disabled={stylingCount > 0}
+                    rightsConfirmed={rightsConfirmed}
+                    hintId={rightsHintId}
                     onChange={(value) => chooseStyle(selected.id, value)}
                   />
                   {photos.length > 1 ? (
                     <button
                       type="button"
                       onClick={() => applyStyleToAll(selected.style ?? "photo")}
-                      disabled={stylingCount > 0}
+                      disabled={stylingCount > 0 || (Boolean(selected.style) && !rightsConfirmed)}
                       className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Use this style on every photo
