@@ -1,6 +1,9 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { StickerCreator } from "@/components/StickerCreator";
 import { UploadLink } from "@/components/UploadLink";
+import { checkoutOfferView } from "@/lib/checkout/config";
+import { paidSheetIdForCurrentUser } from "@/lib/checkout/load";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -34,8 +37,18 @@ export default function Home({ searchParams }: PageProps<"/">) {
 }
 
 async function HomeEditor({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
+  await connection();
   const params = await searchParams;
   const sheetParam = params.sheet;
   const sheetId = typeof sheetParam === "string" ? sheetParam : null;
-  return <StickerCreator initialSheetId={sheetId} />;
+  const checkoutOffer = checkoutOfferView();
+  let paidSheetId: string | null = null;
+  if (checkoutOffer && sheetId) {
+    try {
+      paidSheetId = await paidSheetIdForCurrentUser(sheetId);
+    } catch (error) {
+      console.error("[checkout] entitlement", error);
+    }
+  }
+  return <StickerCreator initialSheetId={sheetId} checkoutOffer={checkoutOffer} paidSheetId={paidSheetId} />;
 }

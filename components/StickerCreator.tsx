@@ -159,7 +159,15 @@ function StyleChoices({
   );
 }
 
-export function StickerCreator({ initialSheetId }: { initialSheetId: string | null }) {
+export function StickerCreator({
+  initialSheetId,
+  checkoutOffer = null,
+  paidSheetId = null,
+}: {
+  initialSheetId: string | null;
+  checkoutOffer?: { productName: string; priceLabel: string } | null;
+  paidSheetId?: string | null;
+}) {
   const { user, loading, ensureAnonymousSession } = useAuth();
   const [photos, setPhotos] = useState<SheetPhoto[]>([]);
   const rightsConfirmed = useSyncExternalStore(
@@ -871,6 +879,9 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
           onAutoDownloadDone={finishAutoDownload}
           onSettings={onSettings}
           onRequireSignIn={() => setSignInPrompt("download")}
+          onBuySignIn={() => setSignInPrompt("header")}
+          checkoutOffer={checkoutOffer}
+          paidSheetId={paidSheetId}
           sheetPhotos={photos.map((photo) => ({
             storedUrl: photo.storedUrl,
             style: photo.style,
