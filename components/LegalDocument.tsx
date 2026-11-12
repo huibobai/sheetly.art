@@ -1,12 +1,76 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { LEGAL_CONTACT_EMAIL, LEGAL_LAST_UPDATED, LEGAL_LAST_UPDATED_ISO } from "@/lib/legal";
+import { LegalTextLink } from "@/components/LegalTextLink";
+import { LEGAL_LAST_UPDATED, LEGAL_LAST_UPDATED_ISO } from "@/lib/legal";
+import {
+  COMPANY_LEGAL_NAME,
+  OPERATING_NAME,
+  PHONE,
+  POSTAL_ADDRESS,
+  SUPPORT_EMAIL,
+  TAKEDOWN_EMAIL,
+  contactMailtoAddress,
+} from "@/lib/site-contact";
+
+const emailLinkClass =
+  "font-medium text-foreground underline decoration-accent-line underline-offset-2 hover:decoration-accent";
+
+function EmailValue({ value, children }: { value: string; children?: ReactNode }) {
+  const address = contactMailtoAddress(value);
+  const label = children ?? value;
+  if (!address) {
+    return <span className="font-medium text-foreground">{label}</span>;
+  }
+  return (
+    <a className={emailLinkClass} href={`mailto:${address}`}>
+      {label}
+    </a>
+  );
+}
 
 export function LegalEmailLink({ children }: { children?: ReactNode }) {
+  return <EmailValue value={TAKEDOWN_EMAIL}>{children}</EmailValue>;
+}
+
+export function SupportEmailLink({ children }: { children?: ReactNode }) {
+  return <EmailValue value={SUPPORT_EMAIL}>{children}</EmailValue>;
+}
+
+const CONTACT_FACTS = [
+  ["Operating name", OPERATING_NAME],
+  ["Company legal name", COMPANY_LEGAL_NAME],
+  ["Postal address", POSTAL_ADDRESS],
+  ["Phone", PHONE],
+] as const;
+
+/** Operator details from lib/site-contact.ts. The same list is on every legal page and on /contact. */
+export function SiteContactFacts({ linkTakedownPage = false }: { linkTakedownPage?: boolean }) {
   return (
-    <a className="font-medium text-foreground underline decoration-accent-line underline-offset-2 hover:decoration-accent" href={`mailto:${LEGAL_CONTACT_EMAIL}`}>
-      {children ?? LEGAL_CONTACT_EMAIL}
-    </a>
+    <dl className="space-y-3">
+      {CONTACT_FACTS.map(([label, value]) => (
+        <div key={label}>
+          <dt className="font-medium text-foreground">{label}</dt>
+          <dd className="whitespace-pre-line">{value}</dd>
+        </div>
+      ))}
+      <div>
+        <dt className="font-medium text-foreground">Support email</dt>
+        <dd>
+          <SupportEmailLink />
+        </dd>
+      </div>
+      <div>
+        <dt className="font-medium text-foreground">Takedown and legal email</dt>
+        <dd>
+          <LegalEmailLink />
+          {linkTakedownPage ? (
+            <>
+              . What to include is on the <LegalTextLink href="/copyright">report page</LegalTextLink>.
+            </>
+          ) : null}
+        </dd>
+      </div>
+    </dl>
   );
 }
 
@@ -40,11 +104,12 @@ export function LegalSection({ title, children }: { title: string; children: Rea
   );
 }
 
-export function LegalLinks({ current }: { current: "terms" | "privacy" | "copyright" }) {
+export function LegalLinks({ current }: { current: "terms" | "privacy" | "copyright" | "contact" }) {
   const items = [
     { href: "/terms", id: "terms" as const, label: "Terms" },
     { href: "/privacy", id: "privacy" as const, label: "Privacy" },
     { href: "/copyright", id: "copyright" as const, label: "Report content" },
+    { href: "/contact", id: "contact" as const, label: "Contact" },
   ];
   return (
     <nav aria-label="Legal pages" className="flex flex-wrap gap-x-4 gap-y-2 text-sm">

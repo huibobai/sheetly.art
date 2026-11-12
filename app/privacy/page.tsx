@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { LegalDocument, LegalEmailLink, LegalLinks, LegalSection } from "@/components/LegalDocument";
+import { LegalDocument, LegalEmailLink, LegalLinks, LegalSection, SiteContactFacts } from "@/components/LegalDocument";
 import { LegalTextLink } from "@/components/LegalTextLink";
 import { GUEST_TRANSFER_COOKIE } from "@/lib/guest-migrate";
-import { LEGAL_ENTITY_NAME, RIGHTS_SESSION_KEY } from "@/lib/legal";
+import { RIGHTS_SESSION_KEY } from "@/lib/legal";
 import { SHEET_STATE_STORAGE_KEY } from "@/lib/sheet-state";
 
 export const metadata: Metadata = {
@@ -14,15 +14,16 @@ export default function PrivacyPage() {
   return (
     <LegalDocument
       title="Privacy"
-      lede="This notice is written for visitors in the United States and in the EU. It is our own plain-language notice, not a letter from a lawyer. We do not list a postal address, a company number, or a home country, because those details are not confirmed."
+      lede="This notice is written for visitors in the United States and in the EU. It is our own plain-language notice, not a letter from a lawyer."
     >
       <LegalLinks current="privacy" />
 
       <LegalSection title="Who we are">
         <p>
-          {LEGAL_ENTITY_NAME} runs Sheetly. For privacy requests, email <LegalEmailLink />. The rules for using the
-          site are on the <LegalTextLink href="/terms">Terms</LegalTextLink>.
+          For privacy requests, email the takedown and legal address below. The rules for using the site are on the{" "}
+          <LegalTextLink href="/terms">Terms</LegalTextLink>.
         </p>
+        <SiteContactFacts />
       </LegalSection>
 
       <LegalSection title="What we store">
@@ -181,7 +182,8 @@ export default function PrivacyPage() {
       <LegalSection title="Contact">
         <p>
           <LegalEmailLink />. To report someone else&apos;s content, use the{" "}
-          <LegalTextLink href="/copyright">report page</LegalTextLink>.
+          <LegalTextLink href="/copyright">report page</LegalTextLink>. Company name, address, and phone are on the{" "}
+          <LegalTextLink href="/contact">contact page</LegalTextLink>.
         </p>
       </LegalSection>
     </LegalDocument>

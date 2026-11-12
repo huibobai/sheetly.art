@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { LegalDocument, LegalEmailLink, LegalLinks, LegalSection } from "@/components/LegalDocument";
+import { LegalDocument, LegalEmailLink, LegalLinks, LegalSection, SiteContactFacts } from "@/components/LegalDocument";
 import { LegalTextLink } from "@/components/LegalTextLink";
-import { LEGAL_ENTITY_NAME, sheetIdFromQuery, takedownMailto } from "@/lib/legal";
+import { sheetIdFromQuery, takedownMailto } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: "Report content · sheetly.art",
@@ -26,7 +26,7 @@ function CopyrightArticle({ sheetId }: { sheetId: string | null }) {
   return (
     <LegalDocument
       title="Report content"
-      lede="Use this page to tell us a photo or sticker sheet uses your copyrighted work or your trademark. This is our own plain-language notice, not a letter from a lawyer. We are not publishing a registered-agent address, a postal address, or a phone number, because those details are not confirmed."
+      lede="Use this page to tell us a photo or sticker sheet uses your copyrighted work or your trademark. This is our own plain-language notice, not a letter from a lawyer."
     >
       <LegalLinks current="copyright" />
 
@@ -39,8 +39,8 @@ function CopyrightArticle({ sheetId }: { sheetId: string | null }) {
 
       <LegalSection title="How to report">
         <p>
-          Email <LegalEmailLink />. {LEGAL_ENTITY_NAME} reads that mailbox. A report from the sticker page can include
-          a sheet id in the link. Do not send passwords or a copy of someone else&apos;s identity document.
+          Email <LegalEmailLink />. A report from the sticker page can include a sheet id in the link. Do not send
+          passwords or a copy of someone else&apos;s identity document.
         </p>
         <p>
           <a
@@ -87,8 +87,9 @@ function CopyrightArticle({ sheetId }: { sheetId: string | null }) {
       </LegalSection>
 
       <LegalSection title="Where to send it">
+        <SiteContactFacts />
         <p>
-          <LegalEmailLink />. That is the only contact on this page.
+          The same details are on the <LegalTextLink href="/contact">contact page</LegalTextLink>.
         </p>
       </LegalSection>
 

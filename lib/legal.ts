@@ -1,14 +1,9 @@
 /**
- * Legal identity for the public pages.
- *
- * There is no registered company. Both values are placeholders.
- * Huibo must confirm them before merge, and the mailbox must be a real inbox.
- * Do not copy these strings into other files. Import them from here.
+ * Legal-page helpers. Business contact details are not stored here.
+ * Edit those only in lib/site-contact.ts.
  */
 
-export const LEGAL_ENTITY_NAME = "Sheetly (operated by BrainStock)";
-
-export const LEGAL_CONTACT_EMAIL = "legal@sheetly.art";
+import { TAKEDOWN_EMAIL, contactMailtoAddress } from "./site-contact.ts";
 
 export const LEGAL_LAST_UPDATED = "11 November 2026";
 
@@ -103,5 +98,6 @@ export function takedownMailto(sheetId: string | null): string {
     subject: sheetId ? `Takedown notice ${sheetId}` : "Takedown notice",
     body: lines.join("\n"),
   });
-  return `mailto:${LEGAL_CONTACT_EMAIL}?${params.toString()}`;
+  const address = contactMailtoAddress(TAKEDOWN_EMAIL) ?? TAKEDOWN_EMAIL;
+  return `mailto:${address}?${params.toString()}`;
 }

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { LegalDocument, LegalEmailLink, LegalLinks, LegalSection } from "@/components/LegalDocument";
+import { LegalDocument, LegalEmailLink, LegalLinks, LegalSection, SiteContactFacts } from "@/components/LegalDocument";
 import { LegalTextLink } from "@/components/LegalTextLink";
-import { LEGAL_ENTITY_NAME } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: "Terms of use · sheetly.art",
@@ -17,10 +16,8 @@ export default function TermsPage() {
       <LegalLinks current="terms" />
 
       <LegalSection title="Who runs this">
-        <p>
-          {LEGAL_ENTITY_NAME} runs Sheetly. There is no company number, postal address, or phone number on this page,
-          because those details are not confirmed. Contact us at <LegalEmailLink />.
-        </p>
+        <p>Questions about these terms go to the takedown and legal email.</p>
+        <SiteContactFacts />
       </LegalSection>
 
       <LegalSection title="What Sheetly is">
@@ -113,7 +110,8 @@ export default function TermsPage() {
       <LegalSection title="Contact">
         <p>
           Questions about these terms: <LegalEmailLink />. To report a photo or sheet, use the{" "}
-          <LegalTextLink href="/copyright">report page</LegalTextLink>.
+          <LegalTextLink href="/copyright">report page</LegalTextLink>. Company name, address, and phone are listed
+          above and on the <LegalTextLink href="/contact">contact page</LegalTextLink>.
         </p>
       </LegalSection>
     </LegalDocument>

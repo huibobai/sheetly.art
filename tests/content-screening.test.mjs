@@ -1,52 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { BLOCKLIST_MESSAGE, blockedTermIn, isRightsConfirmed, rejectionForGenerateBody } from "../lib/content-blocklist.ts";
 import { NSFW_BLOCKED_MESSAGE, outputHasNsfwConcepts } from "../lib/generate-screening.ts";
-import {
-  LEGAL_CONTACT_EMAIL,
-  LEGAL_ENTITY_NAME,
-  LEGAL_LAST_UPDATED,
-  readRightsConfirmed,
-  reportContentHref,
-  takedownMailto,
-  writeRightsConfirmed,
-} from "../lib/legal.ts";
+import { LEGAL_LAST_UPDATED, readRightsConfirmed, reportContentHref, takedownMailto, writeRightsConfirmed } from "../lib/legal.ts";
+import { TAKEDOWN_EMAIL, contactMailtoAddress } from "../lib/site-contact.ts";
 import { STICKER_STYLES, STYLE_PROMPTS } from "../lib/sticker-styles.ts";
 
-const root = fileURLToPath(new URL("..", import.meta.url));
-
-test("placeholder entity and mailbox are the confirmed strings", () => {
-  assert.equal(LEGAL_ENTITY_NAME, "Sheetly (operated by BrainStock)");
-  assert.equal(LEGAL_CONTACT_EMAIL, "legal@sheetly.art");
+test("legal page date stays on the published notice", () => {
   assert.equal(LEGAL_LAST_UPDATED, "11 November 2026");
-});
-
-test("entity name and mailbox are defined only in lib/legal.ts", () => {
-  const hits = [];
-  function walk(dir) {
-    for (const name of readdirSync(dir)) {
-      if (name === "node_modules" || name === ".next" || name === ".git" || name === "tests") {
-        continue;
-      }
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) {
-        walk(path);
-        continue;
-      }
-      if (!/\.(ts|tsx|mjs|js|md|sql|json)$/.test(name)) {
-        continue;
-      }
-      const text = readFileSync(path, "utf8");
-      if (text.includes("legal@sheetly.art") || text.includes("operated by BrainStock")) {
-        hits.push(path.slice(root.length).replaceAll("\\", "/").replace(/^\//, ""));
-      }
-    }
-  }
-  walk(root);
-  assert.deepEqual(hits, ["lib/legal.ts"]);
 });
 
 test("blocklist matches brands, accents, and punctuation, and skips ordinary words", () => {
@@ -165,7 +127,7 @@ test("report links keep a sheet id and drop anything else", () => {
   assert.equal(reportContentHref("marvel"), "/copyright");
   assert.equal(reportContentHref(id.toUpperCase()), `/copyright?sheet=${id}`);
   const mail = takedownMailto(id);
-  assert.equal(mail.startsWith(`mailto:${LEGAL_CONTACT_EMAIL}?`), true);
+  assert.equal(mail.startsWith(`mailto:${contactMailtoAddress(TAKEDOWN_EMAIL)}?`), true);
   const decoded = decodeURIComponent(mail.replaceAll("+", " "));
   assert.equal(decoded.includes(`Sheet id: ${id}`), true);
   assert.equal(decodeURIComponent(takedownMailto(null).replaceAll("+", " ")).includes("Sheet id:"), true);
