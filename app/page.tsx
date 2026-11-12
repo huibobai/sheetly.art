@@ -1,6 +1,8 @@
 import { Suspense } from "react";
+import { OpeningSoon } from "@/components/OpeningSoon";
 import { StickerCreator } from "@/components/StickerCreator";
 import { UploadLink } from "@/components/UploadLink";
+import { isPrelaunch } from "@/lib/launch";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -25,6 +27,8 @@ export default function Home({ searchParams }: PageProps<"/">) {
           <span className="hero-sticker h-24 w-24 rotate-3 bg-mint/30">✌️</span>
         </div>
       </section>
+
+      {isPrelaunch() ? <OpeningSoon source="homepage" /> : null}
 
       <Suspense fallback={<p className="text-sm text-muted">Getting the scissors out…</p>}>
         <HomeEditor searchParams={searchParams} />

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Fredoka, Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
 import { Header } from "@/components/Header";
+import { PrelaunchBanner } from "@/components/PrelaunchBanner";
+import { isPrelaunch, layoutRobots } from "@/lib/launch";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -20,9 +22,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const prelaunch = isPrelaunch();
+
 export const metadata: Metadata = {
   title: "sheetly.art · Turn any photo into a sticker sheet",
   description: "Add a picture, pick a look, and watch your sticker sheet come together. Print it at home.",
+  ...(prelaunch ? { robots: layoutRobots(true) } : {}),
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -38,6 +43,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="min-h-full bg-background text-foreground">
         <AuthProvider>
+          <PrelaunchBanner />
           <Header />
           <main className="mx-auto w-full max-w-5xl px-4 pb-16 pt-8 sm:px-6 lg:px-8">
             {children}
