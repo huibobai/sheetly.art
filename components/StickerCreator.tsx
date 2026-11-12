@@ -27,6 +27,7 @@ import {
   type SheetPreset,
 } from "@/lib/sheets";
 import type { SheetBackground, SheetCount, SheetSize } from "@/lib/sticker-sheet";
+import { BRAND_ASSETS } from "@/lib/brand-assets";
 import { isStickerStyle, STICKER_STYLES, STYLE_LABELS, styleLabel, type StickerStyle } from "@/lib/sticker-styles";
 import { createClient } from "@/lib/supabase/client";
 
@@ -96,9 +97,19 @@ function StyleChoices({
   photoUrl?: string | null;
   disabled?: boolean;
 }) {
-  const options: { id: string; name: string; image: string | null }[] = [
-    { id: "photo", name: "Photo", image: photoUrl ?? null },
-    ...STICKER_STYLES.map((id) => ({ id, name: STYLE_LABELS[id], image: `/styles/${id}.webp` })),
+  const options: { id: string; name: string; image: string | null; alt: string; width?: number; height?: number }[] = [
+    { id: "photo", name: "Photo", image: photoUrl ?? null, alt: "" },
+    ...STICKER_STYLES.map((id) => {
+      const preview = BRAND_ASSETS.stylePreviews[id];
+      return {
+        id,
+        name: STYLE_LABELS[id],
+        image: preview.path,
+        alt: preview.alt,
+        width: preview.width,
+        height: preview.height,
+      };
+    }),
   ];
 
   return (
@@ -128,9 +139,9 @@ function StyleChoices({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={option.image}
-                  alt=""
-                  width={isStyleThumb ? 400 : undefined}
-                  height={isStyleThumb ? 400 : undefined}
+                  alt={option.alt}
+                  width={option.width}
+                  height={option.height}
                   loading={isStyleThumb ? "lazy" : undefined}
                   decoding="async"
                   className="aspect-square w-full rounded-lg bg-stone-50 object-cover"
