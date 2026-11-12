@@ -1,5 +1,6 @@
 "use client";
 import { MakingProgress } from "@/components/MakingProgress";
+import { SheetBuy } from "@/components/SheetBuy";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -180,6 +181,9 @@ export function StickerSheet({
   autoDownload = false,
   onAutoDownloadDone,
   onSettings,
+  checkoutOffer = null,
+  paidSheetId = null,
+  onBuySignIn,
 }: {
   artworks: string[];
   storedPhotoUrl: string | null;
@@ -192,6 +196,9 @@ export function StickerSheet({
   autoDownload?: boolean;
   onAutoDownloadDone?: () => void;
   onSettings?: (settings: { count: SheetCount; size: SheetSize; background: SheetBackground; padding: number }) => void;
+  checkoutOffer?: { productName: string; priceLabel: string } | null;
+  paidSheetId?: string | null;
+  onBuySignIn?: () => void;
 }) {
   const { user, loading } = useAuth();
   const permanent = isPermanentUser(user);
@@ -540,7 +547,29 @@ export function StickerSheet({
       onRequireSignIn?.();
       return;
     }
-    const gate = await fetch("/api/download-auth", { method: "POST" });
+    const gate = await fetch(
+      "/api/download-auth",
+      checkoutOffer
+        ? {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sheetId: savedSheetId ?? preset?.id ?? null }),
+          }
+        : { method: "POST" },
+    );
+    if (gate.status === 402) {
+      let message = "Buy this download to unlock the file.";
+      try {
+        const payload = (await gate.json()) as { error?: string };
+        if (payload.error) {
+          message = payload.error;
+        }
+      } catch {
+        // The response was not JSON.
+      }
+      setError(message);
+      return;
+    }
     if (!gate.ok) {
       onRequireSignIn?.();
       return;
@@ -601,6 +630,13 @@ export function StickerSheet({
     }
   }
 
+  const sheetIdForCheckout = savedSheetId ?? preset?.id ?? null;
+  const checkoutPaid = Boolean(
+    checkoutOffer &&
+      paidSheetId &&
+      sheetIdForCheckout &&
+      paidSheetId.toLowerCase() === sheetIdForCheckout.toLowerCase(),
+  );
   const photoCount = artworkUrls.length;
   const sheetNote = SHEET_CUT_LINE;
   const summaryParts = [
@@ -740,14 +776,25 @@ export function StickerSheet({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void download()}
-            disabled={downloading || (permanent && (loading || !ready))}
-            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {downloading ? "Getting the print file ready…" : "Download my sheet"}
-          </button>
+          {checkoutOffer && !checkoutPaid ? (
+            <SheetBuy
+              sheetId={sheetIdForCheckout}
+              productName={checkoutOffer.productName}
+              priceLabel={checkoutOffer.priceLabel}
+              signedIn={permanent}
+              onSignIn={onBuySignIn}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => void download()}
+              disabled={downloading || (permanent && (loading || !ready))}
+              className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {downloading ? "Getting the print file ready…" : "Download my sheet"}
+            </button>
+          )}
+          {checkoutPaid ? <p className="text-center text-sm text-muted">Paid. This download is unlocked.</p> : null}
           <p className="text-center text-sm">
             <Link
               href={reportContentHref(savedSheetId ?? preset?.id)}
@@ -773,7 +820,7 @@ export function StickerSheet({
                   {saveNote}
                 </p>
               ) : null}
-              {!loading && !permanent ? (
+              {!loading && !permanent && !checkoutOffer ? (
                 <p className="text-sm text-muted">Free to try. We only ask you to sign in when you download, and your photos stay put.</p>
               ) : null}
             </div>
