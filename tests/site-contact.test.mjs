@@ -15,12 +15,15 @@ import {
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-test("placeholder detector reports every contact field that is still a placeholder", () => {
+const DECIDED_INBOX = "contact@sheetly.art";
+const STILL_PENDING = ["companyLegalName", "operatingName", "postalAddress", "phone"];
+
+test("placeholder detector reports only the fields that are still placeholders", () => {
   assert.equal(CONTACT_PLACEHOLDERS_PENDING, true);
   const report = contactPlaceholderReport();
   assert.deepEqual(
     report.map((row) => row.field).sort(),
-    Object.keys(SITE_CONTACT).sort(),
+    [...STILL_PENDING].sort(),
   );
   assert.deepEqual(
     [...CONTACT_PLACEHOLDER_FIELDS].sort(),
@@ -30,6 +33,8 @@ test("placeholder detector reports every contact field that is still a placehold
     assert.equal(row.value, SITE_CONTACT[row.field]);
     assert.equal(row.value.includes(PLACEHOLDER_MARK), true);
   }
+  assert.equal(SITE_CONTACT.takedownEmail.includes(PLACEHOLDER_MARK), false);
+  assert.equal(SITE_CONTACT.supportEmail.includes(PLACEHOLDER_MARK), false);
 
   const filledPhone = contactPlaceholderReport({ ...SITE_CONTACT, phone: "+852 5555 0100" });
   assert.equal(
@@ -39,9 +44,11 @@ test("placeholder detector reports every contact field that is still a placehold
   assert.equal(filledPhone.length, report.length - 1);
 });
 
-test("takedown mailbox can be linked, and the support placeholder cannot", () => {
-  assert.equal(contactMailtoAddress(SITE_CONTACT.takedownEmail), "legal@sheetly.art");
-  assert.equal(contactMailtoAddress(SITE_CONTACT.supportEmail), null);
+test("takedown and support both use the decided inbox", () => {
+  assert.equal(SITE_CONTACT.takedownEmail, DECIDED_INBOX);
+  assert.equal(SITE_CONTACT.supportEmail, DECIDED_INBOX);
+  assert.equal(contactMailtoAddress(SITE_CONTACT.takedownEmail), DECIDED_INBOX);
+  assert.equal(contactMailtoAddress(SITE_CONTACT.supportEmail), DECIDED_INBOX);
 });
 
 test("email footer includes every contact field and the legal links", () => {
@@ -76,11 +83,37 @@ test("contact strings live only in lib/site-contact.ts", () => {
         continue;
       }
       const text = readFileSync(path, "utf8");
-      if (text.includes(PLACEHOLDER_MARK) || text.includes("legal@sheetly.art") || text.includes("BrainStock")) {
+      if (text.includes(PLACEHOLDER_MARK) || text.includes(DECIDED_INBOX) || text.includes("BrainStock")) {
         hits.push(path.slice(root.length).replaceAll("\\", "/").replace(/^\//, ""));
       }
     }
   }
   walk(root);
   assert.deepEqual(hits, ["lib/site-contact.ts"]);
+});
+
+test("the retired legal mailbox does not appear in the repo", () => {
+  const retired = ["legal", "@sheetly.art"].join("");
+  const hits = [];
+  function walk(dir) {
+    for (const name of readdirSync(dir)) {
+      if (name === "node_modules" || name === ".next" || name === ".git") {
+        continue;
+      }
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) {
+        walk(path);
+        continue;
+      }
+      if (!/\.(ts|tsx|mjs|js|md|sql|json|css)$/.test(name)) {
+        continue;
+      }
+      const text = readFileSync(path, "utf8");
+      if (text.includes(retired)) {
+        hits.push(path.slice(root.length).replaceAll("\\", "/").replace(/^\//, ""));
+      }
+    }
+  }
+  walk(root);
+  assert.deepEqual(hits, []);
 });

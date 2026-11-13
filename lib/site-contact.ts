@@ -6,8 +6,9 @@
  * Import this module. Terms, Privacy, the copyright / takedown page, /contact,
  * the site footer, and lib/email/footer.ts all read from here.
  *
- * Every value is a placeholder. Replace the whole value when the real detail
- * exists, and leave no "[PLACEHOLDER:" text behind.
+ * The takedown inbox and the support inbox are both contact@sheetly.art.
+ * The other values are still placeholders. Replace each whole value when the
+ * real detail exists, and leave no "[PLACEHOLDER:" text behind.
  *
  * CONTACT_PLACEHOLDERS_PENDING is true while any value still contains that
  * mark. contactPlaceholderReport() lists the remaining fields and their text,
@@ -17,10 +18,7 @@
  * - companyLegalName — about 19 Nov, when the Hong Kong company exists
  * - phone — Hong Kong number, about 14 Nov
  * - postalAddress — the postal address
- * - takedownEmail — a working inbox at legal@sheetly.art
- *   (sheetly.art has no MX records yet, so that mailbox cannot receive mail)
  * - operatingName — the name the business trades under
- * - supportEmail — the general support inbox
  */
 
 export const PLACEHOLDER_MARK = "[PLACEHOLDER:";
@@ -30,8 +28,8 @@ export const SITE_CONTACT = {
   operatingName: "[PLACEHOLDER: operating name]",
   postalAddress: "[PLACEHOLDER: postal address]",
   phone: "[PLACEHOLDER: HK phone]",
-  takedownEmail: "legal@sheetly.art [PLACEHOLDER: inbox not set up]",
-  supportEmail: "[PLACEHOLDER: general support email]",
+  takedownEmail: "contact@sheetly.art",
+  supportEmail: "contact@sheetly.art",
 } as const;
 
 export type SiteContactField = keyof typeof SITE_CONTACT;
