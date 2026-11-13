@@ -1,23 +1,19 @@
 import type { Metadata } from "next";
-import { Fredoka, Geist, Geist_Mono } from "next/font/google";
+import { Fredoka, Geist } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
 import { Header } from "@/components/Header";
+import { SiteFooter } from "@/components/SiteFooter";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const geist = Geist({
+  variable: "--font-geist",
   subsets: ["latin"],
 });
 
 const display = Fredoka({
-  variable: "--font-display",
+  variable: "--font-fredoka",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "700",
 });
 
 export const metadata: Metadata = {
@@ -27,21 +23,17 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${display.variable} h-full scroll-smooth antialiased`}
-    >
+    <html lang="en" className={`${geist.variable} ${display.variable} h-full antialiased`}>
       <head>
         {/* Styled stickers come back from fal's CDN; open the connection early. */}
         <link rel="preconnect" href="https://v3.fal.media" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://fal.media" />
       </head>
-      <body className="min-h-full bg-background text-foreground">
+      <body>
         <AuthProvider>
           <Header />
-          <main className="mx-auto w-full max-w-5xl px-4 pb-16 pt-8 sm:px-6 lg:px-8">
-            {children}
-          </main>
+          <main>{children}</main>
+          <SiteFooter />
         </AuthProvider>
       </body>
     </html>
