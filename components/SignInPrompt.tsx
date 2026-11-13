@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/components/AuthProvider";
 import { SIGN_IN_PRIVACY_NOTICE } from "@/lib/copy";
 import type { GoogleLinkFallback } from "@/lib/auth-errors";
@@ -209,8 +210,8 @@ export function SignInPrompt({
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-4 sm:items-center" onClick={onClose}>
+  const dialog = (
+    <div className="dialog-scrim" onClick={onClose}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -219,27 +220,27 @@ export function SignInPrompt({
         aria-describedby={descriptionId}
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-md rounded-3xl border border-border bg-surface p-6 shadow-lg outline-none"
+        className="dialog-panel"
       >
-        <h2 id={titleId} className="text-lg font-semibold tracking-tight">
+        <h2 id={titleId}>
           {title}
         </h2>
-        <p id={descriptionId} className="mt-2 text-sm leading-6 text-muted">
+        <p id={descriptionId} className="muted">
           {SIGN_IN_PRIVACY_NOTICE} Sign in to download or save the sheet. You won&apos;t need to upload these photos again.
         </p>
 
         {flow.step === "choose" ? (
-          <div className="mt-5 space-y-4">
+          <div className="stack-lg">
             <button
               type="button"
               onClick={() => void continueWithGoogle(fallback || !isAnonymousUser(user) ? "sign-in" : "link")}
               disabled={pending}
-              className="w-full rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300 disabled:opacity-50"
+              className="btn btn-block"
             >
               {pending ? "Opening Google…" : fallback ? "Sign in with Google and move my photos" : "Continue with Google"}
             </button>
             {fallback ? (
-              <p role="status" className="text-sm text-muted">
+              <p role="status" className="muted">
                 {fallback === "linking-off"
                   ? "Google linking isn't turned on yet. Signing in still moves these photos onto that account."
                   : "That Google account already has a Sheetly account. We'll move these photos over when you sign in."}
@@ -253,15 +254,15 @@ export function SignInPrompt({
             <button
               type="button"
               onClick={() => setFlow((current) => reduceDialog(current, { type: "choose-email" }))}
-              className="w-full rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
+              className="btn btn-block"
             >
-              Sign up or sign in with email
+              Sign in with email
             </button>
           </div>
         ) : null}
 
         {flow.step === "email" ? (
-          <form onSubmit={(event) => void submitEmail(event)} className="mt-5 space-y-3">
+          <form onSubmit={(event) => void submitEmail(event)} className="stack-lg">
             <div className="space-y-2">
               <label htmlFor={emailId} className="text-sm font-medium">
                 Email
@@ -279,20 +280,20 @@ export function SignInPrompt({
                 placeholder="you@example.com"
                 aria-invalid={flow.error ? true : undefined}
                 aria-describedby={flow.error ? errorId : undefined}
-                className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none focus:border-stone-400"
+                className="field"
               />
             </div>
             <button
               type="submit"
               disabled={pending}
-              className="w-full rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong disabled:opacity-50"
+              className="btn btn-primary btn-block"
             >
               {pending ? "Sending the code…" : "Email me a code"}
             </button>
             <button
               type="button"
               onClick={() => setFlow((current) => reduceDialog(current, { type: "back" }))}
-              className="text-sm font-medium text-muted hover:text-foreground"
+              className="btn btn-ghost"
             >
               Back
             </button>
@@ -300,8 +301,8 @@ export function SignInPrompt({
         ) : null}
 
         {flow.step === "code" ? (
-          <form onSubmit={(event) => void submitCode(event)} className="mt-5 space-y-3">
-            <p className="text-sm text-muted">
+          <form onSubmit={(event) => void submitCode(event)} className="stack-lg">
+            <p className="muted">
               Enter the 6-digit code we sent to <span className="font-medium text-foreground">{flow.email}</span>.
             </p>
             <div className="space-y-2">
@@ -329,13 +330,13 @@ export function SignInPrompt({
                 }}
                 aria-invalid={flow.error ? true : undefined}
                 aria-describedby={flow.error ? errorId : undefined}
-                className="w-full rounded-xl border border-border bg-white px-3 py-2 text-lg tracking-[0.3em] outline-none focus:border-stone-400"
+                className="field field-code"
               />
             </div>
             <button
               type="submit"
               disabled={pending || !isCompleteOtp(code)}
-              className="w-full rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong disabled:opacity-50"
+              className="btn btn-primary btn-block"
             >
               {pending ? "Checking the code…" : "Verify and continue"}
             </button>
@@ -343,14 +344,14 @@ export function SignInPrompt({
               type="button"
               onClick={() => void resend()}
               disabled={pending || !canResend(flow.sentAt, now)}
-              className="text-sm font-medium text-muted hover:text-foreground disabled:opacity-60"
+              className="btn btn-ghost"
             >
               {waitMs > 0 ? `Send a new code in ${Math.ceil(waitMs / 1000)}s` : "Send a new code"}
             </button>
             <button
               type="button"
               onClick={() => setFlow((current) => reduceDialog(current, { type: "back" }))}
-              className="ml-4 text-sm font-medium text-muted hover:text-foreground"
+              className="btn btn-ghost"
             >
               Use a different email
             </button>
@@ -358,21 +359,27 @@ export function SignInPrompt({
         ) : null}
 
         {flow.step === "verified" ? (
-          <p role="status" className="mt-5 text-sm text-muted">
+          <p role="status" className="muted">
             You&apos;re signed in.
           </p>
         ) : null}
 
         {flow.error ? (
-          <p id={errorId} role="alert" className="mt-3 text-sm text-red-600">
+          <p id={errorId} role="alert" className="alert">
             {flow.error}
           </p>
         ) : null}
 
-        <button type="button" onClick={onClose} className="mt-4 text-sm font-medium text-muted hover:text-foreground">
+        <button type="button" onClick={onClose} className="btn btn-ghost">
           Not now
         </button>
       </div>
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(dialog, document.body);
 }
