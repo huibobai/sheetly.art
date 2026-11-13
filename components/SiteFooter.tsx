@@ -12,7 +12,10 @@ export function SiteFooter() {
           <nav className="footer-links" aria-label="Footer">
             <Link href="/">Home</Link>
             <Link href="/sheets">My sheets</Link>
-            <Link href="/#privacy">Privacy</Link>
+            <Link href="/terms">Terms</Link>
+            <Link href="/privacy">Privacy</Link>
+            <Link href="/copyright">Report this content</Link>
+            <Link href="/contact">Contact</Link>
           </nav>
         </div>
       </div>

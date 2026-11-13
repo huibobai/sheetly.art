@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/components/AuthProvider";
+import { LegalTextLink } from "@/components/LegalTextLink";
 import { SIGN_IN_PRIVACY_NOTICE } from "@/lib/copy";
 import type { GoogleLinkFallback } from "@/lib/auth-errors";
 import { isAnonymousUser } from "@/lib/auth-user";
@@ -379,6 +380,20 @@ export function SignInPrompt({
             {flow.error}
           </p>
         ) : null}
+
+        <p className="muted">
+          {flow.purpose === "download" ? (
+            <>
+              By downloading you agree to the <LegalTextLink href="/terms" newTab>Terms</LegalTextLink> and{" "}
+              <LegalTextLink href="/privacy" newTab>Privacy</LegalTextLink>.
+            </>
+          ) : (
+            <>
+              The <LegalTextLink href="/terms" newTab>Terms</LegalTextLink> and{" "}
+              <LegalTextLink href="/privacy" newTab>Privacy</LegalTextLink> apply.
+            </>
+          )}
+        </p>
 
         <button type="button" onClick={onClose} className="btn btn-ghost">
           Not now

@@ -79,6 +79,9 @@ export default function Home({ searchParams }: PageProps<"/">) {
           <div className="privacy-plate">
             <p>{PRIVACY_NOTICE}</p>
           </div>
+          <p>
+            <Link href="/privacy">Read the full privacy notice</Link>
+          </p>
         </div>
       </section>
 

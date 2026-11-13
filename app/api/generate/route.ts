@@ -1,6 +1,8 @@
 import { fal } from "@fal-ai/client";
 import { connection } from "next/server";
 import { resolveGuestIp } from "@/lib/client-ip";
+import { BLOCKLIST_MESSAGE, blockedTermIn, rejectionForGenerateBody } from "@/lib/content-blocklist";
+import { NSFW_BLOCKED_MESSAGE, outputHasNsfwConcepts } from "@/lib/generate-screening";
 import { isGuestDailyCap, interpretQuotaResult, quotaLimitsFromEnv, quotaMessage, quotaRpcArgs, GUEST_LIMIT_CODE } from "@/lib/generation-quota";
 import { generateSourceFor, isFalMediaHost, type StorageRef } from "@/lib/image-source";
 import { isStickerStyle, STYLE_PROMPTS } from "@/lib/sticker-styles";
@@ -79,6 +81,13 @@ export async function POST(request: Request) {
     return json({ error: "Pick an uploaded photo and a sticker style." }, 400);
   }
 
+  // Rights and the name blocklist are ordinary validation. They do not use a quota slot
+  // and they do not call fal. A safety block later is different: quota is already taken.
+  const rejection = rejectionForGenerateBody(body);
+  if (rejection) {
+    return json({ error: rejection.error }, rejection.status);
+  }
+
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
   const style = typeof body.style === "string" ? body.style : "";
 
@@ -86,6 +95,12 @@ export async function POST(request: Request) {
   const source = imageUrl ? generateSourceFor(imageUrl, supabaseUrl(), user.id) : null;
   if (!source || !isStickerStyle(style)) {
     return json({ error: "Pick an uploaded photo and a sticker style." }, 400);
+  }
+
+  // Preset text is ours, not the visitor's. Still refuse it if a future preset names a brand.
+  if (blockedTermIn(STYLE_PROMPTS[style])) {
+    console.error("generate: style prompt is on the blocklist", style);
+    return json({ error: BLOCKLIST_MESSAGE }, 400);
   }
 
   const falKey = process.env.FAL_KEY;
@@ -145,6 +160,7 @@ export async function POST(request: Request) {
         output_format: "png",
         enhance_prompt: false,
         guidance_scale: 4,
+        // Leave the model's default safety level in place. Do not pass a more permissive setting.
       },
       // Do not keep inputs/outputs in fal's request history (default is 90 days).
       // https://fal.ai/docs/documentation/model-apis/media-expiration
@@ -156,7 +172,19 @@ export async function POST(request: Request) {
       pollInterval: 200,
     });
 
-    const generatedUrl = result.data.images[0]?.url;
+    const data: unknown = result.data;
+    // Quota was consumed above, before this check. A safety block still counts
+    // toward the quota so a flagged picture cannot be retried for free.
+    // The URL is not returned and is not written to the database.
+    if (outputHasNsfwConcepts(data)) {
+      console.error("generate: dropped fal output flagged has_nsfw_concepts");
+      return json({ error: NSFW_BLOCKED_MESSAGE }, 422);
+    }
+
+    const generatedUrl =
+      data && typeof data === "object" && Array.isArray((data as { images?: unknown }).images)
+        ? (data as { images: { url?: unknown }[] }).images[0]?.url
+        : undefined;
     if (!isFalOutputUrl(generatedUrl)) {
       console.error("generate: fal returned no image or an unexpected host");
       return json({ error: GENERIC_ERROR }, 502);
