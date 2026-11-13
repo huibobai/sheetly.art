@@ -96,14 +96,18 @@ export function SignInPrompt({
       }
       const nodes = [...dialogRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), a[href]")];
       if (!nodes.length) {
+        event.preventDefault();
+        dialogRef.current.focus();
         return;
       }
       const first = nodes[0];
       const last = nodes[nodes.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      const active = document.activeElement;
+      const inside = active instanceof Node && dialogRef.current.contains(active);
+      if (event.shiftKey && (!inside || active === first || active === dialogRef.current)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && (!inside || active === last)) {
         event.preventDefault();
         first.focus();
       }
@@ -221,6 +225,12 @@ export function SignInPrompt({
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         className="dialog-panel"
+        style={{
+          minHeight: 0,
+          maxHeight: "calc(100svh - var(--space-xl))",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+        }}
       >
         <h2 id={titleId}>
           {title}
