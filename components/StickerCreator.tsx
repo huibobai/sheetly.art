@@ -13,6 +13,7 @@ import { isAnonymousUser, isPermanentUser } from "@/lib/auth-user";
 import { GUEST_LIMIT_CODE, GUEST_LIMIT_MESSAGE } from "@/lib/generation-quota";
 import { rewriteStorageOwner } from "@/lib/guest-migrate";
 import { displaySrc } from "@/lib/image-source";
+import { contentTypeForBlob, uploadPrivateImage, UploadFailure } from "@/lib/private-upload";
 import { buildSheetState, clearSheetState, loadSheetState, saveSheetState, type SheetStateSettings } from "@/lib/sheet-state";
 import type { SignInPurpose } from "@/lib/sign-in-flow";
 import {
@@ -156,6 +157,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   const [guestLimit, setGuestLimit] = useState(false);
   const [googleNotice, setGoogleNotice] = useState<GoogleLinkFallback | null>(null);
   const [autoDownload, setAutoDownload] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const inflightRef = useRef(new Set<string>());
   const failedRef = useRef(new Set<string>());
   const styleRunLockRef = useRef(false);
@@ -163,6 +165,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
   const photoIdsRef = useRef<string[]>([]);
   const selectedIntentRef = useRef<string | null>(null);
   const ensureRef = useRef(ensureAnonymousSession);
+  const retryingRef = useRef(new Set<string>());
   useEffect(() => {
     ensureRef.current = ensureAnonymousSession;
   });
@@ -535,6 +538,7 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
             ? {
                 ...photo,
                 localOnly: true,
+                uploadFailed: false,
                 error: "We couldn't store this photo privately just now. You can still preview it. Try adding it again to use an AI style.",
               }
             : photo,
@@ -542,11 +546,55 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
       );
       return;
     }
+    const message =
+      reason && reason !== "upload" ? reason : "The upload didn't finish. You can still print this photo.";
     setPhotos((current) =>
       current.map((photo) =>
-        photo.id === id ? { ...photo, uploadFailed: true, error: "The upload didn't finish. You can still print this photo." } : photo,
+        photo.id === id ? { ...photo, uploadFailed: true, localOnly: false, error: message } : photo,
       ),
     );
+  }
+
+  async function retryUpload(id: string) {
+    const photo = photos.find((item) => item.id === id);
+    if (!photo || !photo.previewUrl.startsWith("blob:") || retryingRef.current.has(id)) {
+      return;
+    }
+    retryingRef.current.add(id);
+    setRetryingId(id);
+    setPhotos((current) =>
+      current.map((item) => (item.id === id ? { ...item, uploadFailed: false, error: null } : item)),
+    );
+    try {
+      const ready = await prepareSession();
+      if (!ready) {
+        failPhoto(id, "session");
+        return;
+      }
+      const {
+        data: { session },
+      } = await createClient().auth.getSession();
+      if (!session) {
+        failPhoto(id, "session");
+        return;
+      }
+      const blob = await fetch(photo.previewUrl).then((response) => response.blob());
+      const file = contentTypeForBlob(blob.type);
+      const storedRef = await uploadPrivateImage({
+        userId: session.user.id,
+        fileId: crypto.randomUUID(),
+        blob,
+        contentType: file.contentType,
+        extension: file.extension,
+        accessToken: session.access_token,
+      });
+      storePhoto(id, storedRef);
+    } catch (error) {
+      failPhoto(id, error instanceof UploadFailure ? error.userMessage : undefined);
+    } finally {
+      retryingRef.current.delete(id);
+      setRetryingId((current) => (current === id ? null : current));
+    }
   }
 
   function removePhoto(id: string) {
@@ -759,10 +807,21 @@ export function StickerCreator({ initialSheetId }: { initialSheetId: string | nu
                 })}
               </ul>
               {stylingCount > 0 ? <MakingProgress count={stylingCount} /> : null}
-              {selected?.error ? (
-                <p role="alert" className="alert">
-                  {selected.error}
+              {retryingId === selected?.id ? (
+                <p role="status" className="muted">
+                  Trying the upload again…
                 </p>
+              ) : selected?.error ? (
+                <div className="stack">
+                  <p role="alert" className="alert">
+                    {selected.error}
+                  </p>
+                  {(selected.uploadFailed || selected.localOnly) && selected.previewUrl.startsWith("blob:") ? (
+                    <button type="button" onClick={() => void retryUpload(selected.id)} className="btn">
+                      Try the upload again
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
               {photos.length < MAX_PHOTOS ? (
                 <PhotoUpload
