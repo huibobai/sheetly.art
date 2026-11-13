@@ -1,35 +1,100 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { StickerCreator } from "@/components/StickerCreator";
 import { UploadLink } from "@/components/UploadLink";
+import { PRIVACY_NOTICE, SHEET_CUT_LINE } from "@/lib/copy";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
-    <div className="space-y-10 sm:space-y-12">
-      <section className="grid items-center gap-8 pt-2 sm:pt-4 md:grid-cols-[minmax(0,1fr)_14rem]">
-        <div className="max-w-2xl space-y-5">
-          <p className="inline-block -rotate-2 rounded-full bg-sun px-3 py-1 text-sm font-semibold text-ink">
-            Free to try · no app needed
-          </p>
-          <h1 className="font-display text-balance text-4xl font-bold leading-[1.05] tracking-tight sm:text-6xl">
-            Your photo, now a <span className="text-accent">sticker sheet</span>
-          </h1>
-          <p className="max-w-xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
-            Add a picture, pick a look, and watch the sheet come together. Like it? Download a file you can print at
-            home. Printed and delivered to your door is coming soon.
-          </p>
-          <UploadLink />
-        </div>
-        <div aria-hidden="true" className="hidden grid-cols-2 gap-4 md:grid">
-          <span className="hero-sticker h-24 w-24 -rotate-6 bg-accent-soft">🐶</span>
-          <span className="hero-sticker mt-8 h-24 w-24 rotate-6 rounded-full bg-sun">🌼</span>
-          <span className="hero-sticker h-24 w-24 rotate-3 bg-mint/30">✌️</span>
+    <>
+      <section className="hero">
+        <div className="container stage-grid">
+          <div className="stage-copy">
+            <h1>Your photo, now a sticker sheet</h1>
+            <p className="lead">Add a picture, pick a look, and print it at home.</p>
+            <UploadLink />
+          </div>
+          <Suspense fallback={<p className="muted">Getting the scissors out…</p>}>
+            <HomeEditor searchParams={searchParams} />
+          </Suspense>
         </div>
       </section>
 
-      <Suspense fallback={<p className="text-sm text-muted">Getting the scissors out…</p>}>
-        <HomeEditor searchParams={searchParams} />
-      </Suspense>
-    </div>
+      <section className="band reveal">
+        <div className="container">
+          <div className="section-head">
+            <h2>Three moves, then a sheet</h2>
+            <p className="lead">The same sheet you are already looking at.</p>
+          </div>
+          <ol className="steps">
+            <li>
+              <span className="num">1</span>
+              <h3>Add a picture</h3>
+              <p>One photo or a bunch. Drop it on the sheet.</p>
+            </li>
+            <li>
+              <span className="num">2</span>
+              <h3>Pick a look</h3>
+              <p>Tap a style and watch that photo change.</p>
+            </li>
+            <li>
+              <span className="num">3</span>
+              <h3>Download the file</h3>
+              <p>A PNG you can print at home.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section className="band band-print reveal">
+        <div className="container stack-lg">
+          <h2>Print at home today</h2>
+          <p>Free to try. No app needed. Download a file you can print at home.</p>
+          <p className="statement">Printed and delivered to your door is coming soon.</p>
+        </div>
+      </section>
+
+      <section className="band band-cut reveal">
+        <div className="container cut-layout">
+          <div className="section-head">
+            <h2>Dashed lines show the scissors</h2>
+            <p>{SHEET_CUT_LINE}</p>
+          </div>
+          <div className="cut-map" role="img" aria-label="A sheet divided by dashed cut lines">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+      </section>
+
+      <section className="band band-privacy reveal" id="privacy">
+        <div className="container">
+          <div className="section-head">
+            <h2>Where a photo goes</h2>
+          </div>
+          <div className="privacy-plate">
+            <p>{PRIVACY_NOTICE}</p>
+          </div>
+          <p>
+            <Link href="/privacy">Read the full privacy notice</Link>
+          </p>
+        </div>
+      </section>
+
+      <section className="band band-close">
+        <div className="container stack">
+          <h2>Start on the sheet</h2>
+          <p>The generator is already open on this page.</p>
+          <Link href="#upload" className="btn btn-ghost">
+            Back to the sheet
+          </Link>
+        </div>
+      </section>
+    </>
   );
 }
 

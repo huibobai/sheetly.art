@@ -15,7 +15,7 @@ export function RightsConfirm({
   const inputId = useId();
 
   return (
-    <div className="rounded-2xl border border-border bg-stone-50 px-3 py-3">
+    <div className="panel">
       <div className="flex items-start gap-3">
         <input
           id={inputId}
@@ -23,7 +23,7 @@ export function RightsConfirm({
           checked={checked}
           onChange={(event) => onChange(event.target.checked)}
           aria-describedby={hintId}
-          className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+          className="mt-1 h-4 w-4 shrink-0 accent-accent"
         />
         <div className="text-sm leading-6">
           <label htmlFor={inputId}>

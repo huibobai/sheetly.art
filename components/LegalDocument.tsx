@@ -84,14 +84,18 @@ export function LegalDocument({
   children: ReactNode;
 }) {
   return (
-    <article className="sticker-panel mx-auto max-w-3xl p-5 sm:p-8">
-      <h1 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
-      <p className="mt-3 text-sm font-semibold">
-        Last updated: <time dateTime={LEGAL_LAST_UPDATED_ISO}>{LEGAL_LAST_UPDATED}</time>
-      </p>
-      <p className="mt-4 text-sm leading-6 text-muted">{lede}</p>
-      <div className="mt-8 space-y-8 text-sm leading-6">{children}</div>
-    </article>
+    <div className="container" style={{ paddingBlock: "var(--space-2xl)" }}>
+      <article className="panel stack-lg" style={{ maxWidth: "46rem" }}>
+        <h1 className="font-display text-3xl font-bold tracking-tight sm:text-4xl" style={{ maxWidth: "none" }}>
+          {title}
+        </h1>
+        <p className="mt-3 text-sm font-semibold">
+          Last updated: <time dateTime={LEGAL_LAST_UPDATED_ISO}>{LEGAL_LAST_UPDATED}</time>
+        </p>
+        <p className="mt-4 text-sm leading-6 text-muted">{lede}</p>
+        <div className="stack-lg text-sm leading-6">{children}</div>
+      </article>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { compressImage } from "@/lib/compress-image";
 import { buildUploadPath, PRIVATE_UPLOADS_BUCKET, privateUploadRef } from "@/lib/image-source";
 import { createClient } from "@/lib/supabase/client";
@@ -124,6 +124,8 @@ export function PhotoUpload({
   idleHint,
   onLimit,
   inputId,
+  children,
+  frame = "plain",
 }: {
   onUploaded?: (photo: UploadedPhoto) => void;
   onPreview?: (url: string) => void;
@@ -147,6 +149,8 @@ export function PhotoUpload({
   idleHint?: string;
   onLimit?: () => void;
   inputId?: string;
+  children?: ReactNode;
+  frame?: "plain" | "sheet";
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
@@ -299,11 +303,7 @@ export function PhotoUpload({
     const unavailable = disabled || remainingExtras <= 0;
     return (
       <div className="space-y-2">
-        <label
-          className={`relative inline-flex overflow-hidden rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium hover:border-stone-300 ${
-            isBusy || unavailable ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-          }`}
-        >
+        <label className={`btn ${isBusy || unavailable ? "" : ""}`}>
           <input
             ref={inputRef}
             id={inputId}
@@ -314,12 +314,12 @@ export function PhotoUpload({
             aria-label={buttonLabel}
             aria-busy={isBusy}
             onChange={(event) => void handleFiles(event.target.files ?? undefined)}
-            className="absolute inset-0 z-10 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+            className="sheet-file"
           />
           {isBusy ? statusLabel : buttonLabel}
         </label>
         {error ? (
-          <p role="alert" className="text-sm text-red-600">
+          <p role="alert" className="alert">
             {error}
           </p>
         ) : null}
@@ -327,12 +327,14 @@ export function PhotoUpload({
     );
   }
 
+  const sheetFrame = frame === "sheet";
+
   return (
-    <section className="space-y-3">
+    <div className="stack">
       {showHeading ? (
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">Add a photo</h2>
-          <p className="mt-1 text-sm text-muted">
+          <h2>Add a photo</h2>
+          <p className="muted">
             Drag a photo here, or click to browse. JPG, PNG, or WEBP, up to 10 MB.
             We resize it before upload.
           </p>
@@ -352,11 +354,7 @@ export function PhotoUpload({
           setIsDragging(false);
           void handleFiles(event.dataTransfer.files);
         }}
-        className={`relative flex min-h-56 w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:min-h-72 ${
-          isDragging
-            ? "border-accent bg-accent-soft"
-            : "border-border bg-surface hover:border-stone-300 hover:bg-stone-50"
-        } ${isBusy ? "cursor-wait" : ""}`}
+        className={sheetFrame ? `sheet-drop${isDragging ? " is-dragging" : ""}` : "btn"}
       >
         <input
           ref={inputRef}
@@ -368,27 +366,11 @@ export function PhotoUpload({
           aria-label={statusLabel}
           aria-busy={isBusy}
           onChange={(event) => void handleFiles(event.target.files ?? undefined)}
-          className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-wait"
+          className="sheet-file"
         />
 
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            className={`h-6 w-6 ${phase === "compressing" ? "animate-pulse" : ""}`}
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"
-            />
-          </svg>
-        </span>
-        <p className="mt-4 text-base font-medium">{statusLabel}</p>
-        <p className="mt-1 text-sm text-muted">{statusHint}</p>
+        {children}
+        {sheetFrame ? null : <span>{isBusy ? statusLabel : statusHint}</span>}
       </label>
 
       {phase === "uploading" ? (
@@ -398,23 +380,20 @@ export function PhotoUpload({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={progress}
-          className="h-2 overflow-hidden rounded-full bg-stone-200"
+          className="upload-track"
         >
-          <div
-            className="h-full rounded-full bg-accent transition-[width] duration-150 ease-out"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="upload-bar" style={{ transform: `scaleX(${progress / 100})` }} />
         </div>
       ) : null}
 
       {error ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="alert">
           {error}
         </p>
       ) : null}
 
       {uploaded ? (
-        <figure className="overflow-hidden rounded-2xl border border-border bg-surface p-3 sm:p-4">
+        <figure className="panel">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={uploaded.url}
@@ -426,6 +405,6 @@ export function PhotoUpload({
           </figcaption>
         </figure>
       ) : null}
-    </section>
+    </div>
   );
 }
