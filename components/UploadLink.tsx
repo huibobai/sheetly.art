@@ -13,9 +13,15 @@ export function UploadLink() {
           input.click();
         }
       }}
-      className="inline-flex w-full cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-accent px-7 py-3.5 text-base font-bold text-white shadow-[3px_3px_0_var(--foreground)] transition-transform hover:-translate-y-0.5 hover:bg-accent-strong sm:w-auto"
+      className="btn btn-primary"
     >
-      Add a photo ✂️
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" d="M6 8.5 9.2 4.8a2 2 0 0 1 3.1 0L14 8.5" />
+        <path strokeLinecap="round" d="M8.2 7.2v6.2" />
+        <path strokeLinecap="round" d="M15.2 9.2v7.1" />
+        <path strokeLinecap="round" d="M5 14.5c.4 3 2.2 4.7 5.2 4.7 2.4 0 4-.9 5.1-2.4" />
+      </svg>
+      Add a photo
     </button>
   );
 }

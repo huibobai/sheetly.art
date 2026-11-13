@@ -172,7 +172,7 @@ export function SheetThumbnail({ sheet }: { sheet: SheetRecord }) {
           }}
         />
       ) : (
-        <div className="absolute inset-0 bg-stone-200" aria-hidden="true" />
+        <div className="absolute inset-0 bg-paper-2" aria-hidden="true" />
       )}
     </div>
   );
