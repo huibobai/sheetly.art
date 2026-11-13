@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Hallmark audit scratch (screenshots for the PR live in docs/redesign-after)
+.hallmark/

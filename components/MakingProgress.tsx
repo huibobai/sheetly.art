@@ -8,11 +8,11 @@ import { useEffect, useState, useSyncExternalStore } from "react";
  * last stage holds until the styled image arrives.
  */
 export const MAKING_STAGES = [
-  { at: 0, label: "Snipping out your photo", emoji: "✂️" },
-  { at: 2500, label: "Trying on the new look", emoji: "🎨" },
-  { at: 6500, label: "Adding the white sticker border", emoji: "🤍" },
-  { at: 10000, label: "Laying out your sheet", emoji: "🧩" },
-  { at: 14000, label: "Peeling off the backing… almost there", emoji: "✨" },
+  { at: 0, label: "Snipping out your photo" },
+  { at: 2500, label: "Trying on the new look" },
+  { at: 6500, label: "Adding the white sticker border" },
+  { at: 10000, label: "Laying out your sheet" },
+  { at: 14000, label: "Peeling off the backing… almost there" },
 ] as const;
 
 function subscribeReducedMotion(onStoreChange: () => void) {
@@ -33,7 +33,7 @@ export function stageIndexFor(elapsedMs: number) {
   return index;
 }
 
-const DROP_COLORS = ["#ff5c8a", "#ffc93c", "#2ec4b6", "#7b6cf6"];
+const DROP_TONES = ["drop-accent", "drop-sun", "drop-mint", "drop-grape"];
 
 export function MakingProgress({ count, variant = "card" }: { count: number; variant?: "card" | "overlay" }) {
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => false);
@@ -62,45 +62,37 @@ export function MakingProgress({ count, variant = "card" }: { count: number; var
 
   const drops = (
     <div className="making-drops" aria-hidden="true">
-      {DROP_COLORS.map((color, i) => (
-        <span
-          key={color}
-          className={reducedMotion ? "making-drop is-still" : "making-drop"}
-          style={{ backgroundColor: color, animationDelay: `${i * 0.45}s` }}
-        />
+      {DROP_TONES.map((tone) => (
+        <span key={tone} className={reducedMotion ? `making-drop is-still ${tone}` : `making-drop ${tone}`} />
       ))}
     </div>
   );
 
   if (variant === "overlay") {
     return (
-      <div className="absolute inset-0 flex items-end justify-center bg-white/40 p-3 backdrop-blur-[1px]">
-        <div role="status" aria-live="polite" aria-atomic="true" className="sticker-card w-full max-w-xs px-4 py-3">
-          <div className="flex items-center gap-3">
+      <div className="making-scrim">
+        <div role="status" aria-live="polite" aria-atomic="true" className="panel">
+          <div className="nav-actions">
             {drops}
-            <div className="min-w-0">
-              <p className="font-display text-sm font-bold">{title}</p>
-              <p className="text-sm text-ink-soft">
-                {stage.emoji} {stage.label}
-              </p>
+            <div>
+              <p>{title}</p>
+              <p className="muted">{stage.label}</p>
             </div>
           </div>
           {steps}
-          <p className="mt-2 text-xs text-ink-soft">This is your photo version. The new look pops in when it&apos;s done.</p>
+          <p className="muted">This is your photo version. The new look pops in when it&apos;s done.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div role="status" aria-live="polite" aria-atomic="true" className="sticker-card px-4 py-3">
-      <div className="flex items-center gap-3">
+    <div role="status" aria-live="polite" aria-atomic="true" className="panel">
+      <div className="nav-actions">
         {drops}
         <div>
-          <p className="font-display text-sm font-bold">{title}</p>
-          <p className="text-sm text-ink-soft">
-            {stage.emoji} {stage.label}
-          </p>
+          <p>{title}</p>
+          <p className="muted">{stage.label}</p>
         </div>
       </div>
       {steps}
