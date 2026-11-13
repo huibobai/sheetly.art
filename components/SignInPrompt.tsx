@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/components/AuthProvider";
 import { SIGN_IN_PRIVACY_NOTICE } from "@/lib/copy";
 import type { GoogleLinkFallback } from "@/lib/auth-errors";
@@ -95,14 +96,18 @@ export function SignInPrompt({
       }
       const nodes = [...dialogRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), a[href]")];
       if (!nodes.length) {
+        event.preventDefault();
+        dialogRef.current.focus();
         return;
       }
       const first = nodes[0];
       const last = nodes[nodes.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      const active = document.activeElement;
+      const inside = active instanceof Node && dialogRef.current.contains(active);
+      if (event.shiftKey && (!inside || active === first || active === dialogRef.current)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && (!inside || active === last)) {
         event.preventDefault();
         first.focus();
       }
@@ -209,8 +214,14 @@ export function SignInPrompt({
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-4 sm:items-center" onClick={onClose}>
+  // backdrop-filter on an ancestor (the header) is the containing block for
+  // position:fixed. Portal to the body so the dialog covers the viewport.
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 p-4" onClick={onClose}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -219,7 +230,7 @@ export function SignInPrompt({
         aria-describedby={descriptionId}
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-md rounded-3xl border border-border bg-surface p-6 shadow-lg outline-none"
+        className="max-h-full min-h-0 w-full max-w-md overflow-y-auto overscroll-contain rounded-3xl border border-border bg-surface p-6 shadow-lg outline-none"
       >
         <h2 id={titleId} className="text-lg font-semibold tracking-tight">
           {title}
@@ -373,6 +384,7 @@ export function SignInPrompt({
           Not now
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
