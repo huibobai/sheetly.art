@@ -2,7 +2,6 @@
  * paper: oklch(97.5% 0.016 84) · accent: oklch(50% 0.19 6) · display: Fredoka · body: Geist
  * hero: Counter · nav: edge-aligned · footer: mast · signature: the die-cut sheet you drop a photo onto
  * axes: cream/rounded/berry · posture: full-palette · job: try · imagery: product built · contrast: pass · fold: pass · v2.0.0 */
-/* Hallmark · pre-emit critique: P5 H5 E4 S5 R4 V4 · weakest: E, privacy stays verbatim so it sits under the fold instead of crowding the sheet */
 /* Hallmark · reworded "Add a picture, pick a look, and watch the sheet come together. Like it? Download a file you can print at home. Printed and delivered to your door is coming soon." to "Add a picture, pick a look, and print it at home." · 58 names the screen budget */
 /* Hallmark · dropped "Free to try · no app needed" · 54 names the eyebrow and 63 the middle dot, and both facts move into the print band */
 @import "tailwindcss";
@@ -427,10 +426,6 @@ a.btn {
   padding-top: var(--section-gap-l);
 }
 
-.band-privacy {
-  padding-top: var(--section-gap);
-}
-
 .band-close {
   padding-top: var(--section-gap-s);
   padding-bottom: var(--section-gap);
@@ -518,26 +513,6 @@ a.btn {
 .cut-map span:nth-child(4) { background: var(--color-grape); }
 .cut-map span:nth-child(5) { background: var(--color-paper-2); }
 .cut-map span:nth-child(6) { background: var(--color-sun); }
-
-.privacy-plate {
-  width: 100%;
-  max-width: none;
-  min-height: 280px;
-  padding: var(--space-xl);
-  border-radius: var(--radius-card);
-  background: var(--color-paper-3);
-  box-shadow: var(--shadow-card);
-}
-
-.privacy-plate p {
-  max-width: none;
-  font-size: 2.6rem;
-  line-height: 1.25;
-}
-
-.privacy-plate p + p {
-  margin-top: var(--space-md);
-}
 
 .site-footer {
   padding-block: var(--section-gap-s);
@@ -1007,11 +982,6 @@ a.btn {
 @media (max-width: 40rem) {
   .hero h1 {
     font-size: clamp(2rem, 9vw, 2.6rem);
-  }
-
-  .privacy-plate p {
-    font-size: var(--text-lg);
-    line-height: 1.45;
   }
 
   .demo-sheet {

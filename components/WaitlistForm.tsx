@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 import { WAITLIST_CONSENT_LABEL, WAITLIST_UNAVAILABLE, type WaitlistSource } from "@/lib/waitlist";
 
@@ -83,10 +82,7 @@ export function WaitlistForm({ source }: { source: WaitlistSource }) {
           checked={consent}
           onChange={(event) => setConsent(event.target.checked)}
         />
-        <span>
-          {WAITLIST_CONSENT_LABEL}{" "}
-          <Link href="/#privacy">Privacy</Link>
-        </span>
+        <span>{WAITLIST_CONSENT_LABEL}</span>
       </label>
       {status === "error" ? (
         <p role="alert" className="form-error">

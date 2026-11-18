@@ -12,7 +12,6 @@ export function SiteFooter() {
           <nav className="footer-links" aria-label="Footer">
             <Link href="/">Home</Link>
             <Link href="/sheets">My sheets</Link>
-            <Link href="/#privacy">Privacy</Link>
           </nav>
         </div>
       </div>

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { OpeningSoon } from "@/components/OpeningSoon";
 import { StickerCreator } from "@/components/StickerCreator";
 import { UploadLink } from "@/components/UploadLink";
-import { PRIVACY_NOTICE, SHEET_CUT_LINE } from "@/lib/copy";
+import { SHEET_CUT_LINE } from "@/lib/copy";
 import { isPrelaunch } from "@/lib/launch";
 
 export default function Home({ searchParams }: PageProps<"/">) {
@@ -71,17 +71,6 @@ export default function Home({ searchParams }: PageProps<"/">) {
             <span />
             <span />
             <span />
-          </div>
-        </div>
-      </section>
-
-      <section className="band band-privacy reveal" id="privacy">
-        <div className="container">
-          <div className="section-head">
-            <h2>Where a photo goes</h2>
-          </div>
-          <div className="privacy-plate">
-            <p>{PRIVACY_NOTICE}</p>
           </div>
         </div>
       </section>
