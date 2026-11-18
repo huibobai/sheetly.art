@@ -45,22 +45,22 @@ export function WaitlistForm({ source }: { source: WaitlistSource }) {
 
   if (status === "done") {
     return (
-      <p role="status" className="text-base font-medium">
+      <p role="status" className="lead">
         {message}
       </p>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="relative max-w-md space-y-4" aria-busy={status === "sending"}>
-      <p className="sr-only" aria-hidden="true">
+    <form onSubmit={onSubmit} className="waitlist-form stack-lg" aria-busy={status === "sending"}>
+      <p className="visually-hidden" aria-hidden="true">
         <label>
           Fax number
           <input type="text" name="fax_number" tabIndex={-1} autoComplete="off" defaultValue="" />
         </label>
       </p>
-      <label className="block space-y-1.5 text-sm font-medium" htmlFor={`waitlist-email-${source}`}>
-        <span>Email</span>
+      <div className="stack">
+        <label htmlFor={`waitlist-email-${source}`}>Email</label>
         <input
           id={`waitlist-email-${source}`}
           name="email"
@@ -71,10 +71,10 @@ export function WaitlistForm({ source }: { source: WaitlistSource }) {
           maxLength={254}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="w-full rounded-xl border border-border bg-white px-3 py-2 text-base outline-none focus:border-stone-400"
+          className="field"
         />
-      </label>
-      <label className="flex items-start gap-2 text-sm leading-6" htmlFor={`waitlist-consent-${source}`}>
+      </div>
+      <label className="consent-row" htmlFor={`waitlist-consent-${source}`}>
         <input
           id={`waitlist-consent-${source}`}
           name="consent"
@@ -82,25 +82,18 @@ export function WaitlistForm({ source }: { source: WaitlistSource }) {
           required
           checked={consent}
           onChange={(event) => setConsent(event.target.checked)}
-          className="mt-1 h-4 w-4 shrink-0 accent-accent"
         />
         <span>
           {WAITLIST_CONSENT_LABEL}{" "}
-          <Link href="/privacy" className="font-semibold underline" target="_blank" rel="noopener noreferrer">
-            Privacy
-          </Link>
+          <Link href="/#privacy">Privacy</Link>
         </span>
       </label>
       {status === "error" ? (
-        <p role="alert" className="text-sm font-medium text-red-700">
+        <p role="alert" className="form-error">
           {message}
         </p>
       ) : null}
-      <button
-        type="submit"
-        disabled={status === "sending"}
-        className="inline-flex w-full cursor-pointer items-center justify-center rounded-full border-2 border-ink bg-ink px-5 py-2.5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60 sm:w-auto"
-      >
+      <button type="submit" disabled={status === "sending"} className="btn btn-primary">
         {status === "sending" ? "Saving…" : "Email me when it opens"}
       </button>
     </form>

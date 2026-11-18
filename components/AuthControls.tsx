@@ -28,12 +28,12 @@ export function AuthControls() {
 
   if (permanent && user) {
     return (
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-        <p className="max-w-48 truncate text-sm text-muted">{user.email}</p>
-        <Link href="/sheets" className="text-sm font-medium">
+      <div className="nav-actions">
+        <p className="muted">{user.email}</p>
+        <Link href="/sheets" className="btn btn-ghost">
           My sheets
         </Link>
-        <button type="button" onClick={() => void signOut()} className="text-sm font-medium">
+        <button type="button" onClick={() => void signOut()} className="btn btn-ghost">
           Sign out
         </button>
       </div>
@@ -41,23 +41,21 @@ export function AuthControls() {
   }
 
   return (
-    <div className="ml-auto flex flex-col items-end gap-2">
-      <div className="flex items-center gap-4">
-        <button type="button" onClick={() => openSignIn("save")} className="text-sm font-medium">
-          My sheets
-        </button>
-        <button
-          type="button"
-          onClick={() => openSignIn("header")}
-          aria-haspopup="dialog"
-          aria-expanded={signInOpen}
-          className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
-        >
-          Sign in
-        </button>
-      </div>
+    <div className="nav-actions">
+      <button type="button" onClick={() => openSignIn("save")} className="btn btn-ghost">
+        My sheets
+      </button>
+      <button
+        type="button"
+        onClick={() => openSignIn("header")}
+        aria-haspopup="dialog"
+        aria-expanded={signInOpen}
+        className="btn"
+      >
+        Sign in
+      </button>
       {authError ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p role="alert" className="alert">
           That sign-in didn&apos;t work. Please try again.
         </p>
       ) : null}

@@ -603,37 +603,35 @@ export function StickerSheet({
       ? "Updating the preview…"
       : pendingStyles > 0
         ? `Styling ${pendingStyles === 1 ? "1 photo" : `${pendingStyles} photos`}…`
-        : summaryParts.join(" · ");
+        : summaryParts.join(", ");
 
   return (
-    <section className="sticker-panel p-5 sm:p-7">
-      <h2 className="font-display text-xl font-bold tracking-tight"><span className="step-dot">2</span> Your sticker sheet</h2>
-      <p className="mt-1 text-sm leading-6 text-muted">
+    <section className="panel stack-lg">
+      <h2>
+        <span>2</span> Your sticker sheet
+      </h2>
+      <p className="muted">
         Pick a size and how many. Your sheet shows up right away and gets its new look the moment it&apos;s ready.
       </p>
       {!imageUrl ? (
-        <div className="mt-5 rounded-2xl border border-dashed border-border bg-stone-50 px-6 py-14 text-center">
-          <p className="text-sm font-medium">Your preview will show up here</p>
-          <p className="mt-1 text-sm text-muted">Add a photo to start the sheet.</p>
+        <div className="stack">
+          <p>Your preview will show up here</p>
+          <p className="muted">Add a photo to start the sheet.</p>
         </div>
       ) : (
-        <div className="mt-5 space-y-5">
-          <div className="grid items-start gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
-            <div className="space-y-5">
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">How many stickers</legend>
-                <div className="grid grid-cols-4 gap-2">
+        <div className="stack-lg">
+          <div className="cut-layout">
+            <div className="stack-lg">
+              <fieldset className="stack">
+                <legend>How many stickers</legend>
+                <div className="count-row">
                   {SHEET_COUNTS.map((option) => (
                     <button
                       key={option}
                       type="button"
                       aria-pressed={count === option}
                       onClick={() => setCount(option)}
-                      className={`rounded-xl border px-3 py-2 text-sm font-medium ${
-                        count === option
-                          ? "border-accent bg-accent-soft text-accent"
-                          : "border-border bg-white hover:border-stone-300"
-                      }`}
+                      className="choice"
                     >
                       {option}
                     </button>
@@ -641,20 +639,16 @@ export function StickerSheet({
                 </div>
               </fieldset>
 
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">Sheet size</legend>
-                <div className="grid grid-cols-3 gap-2">
+              <fieldset className="stack">
+                <legend>Sheet size</legend>
+                <div className="count-row">
                   {SHEET_SIZES.map((option) => (
                     <button
                       key={option.id}
                       type="button"
                       aria-pressed={size === option.id}
                       onClick={() => setSize(option.id)}
-                      className={`rounded-xl border px-3 py-2 text-sm font-medium ${
-                        size === option.id
-                          ? "border-accent bg-accent-soft text-accent"
-                          : "border-border bg-white hover:border-stone-300"
-                      }`}
+                      className="choice"
                     >
                       {option.label}
                     </button>
@@ -662,9 +656,9 @@ export function StickerSheet({
                 </div>
               </fieldset>
 
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">Background</legend>
-                <div className="flex flex-wrap gap-2">
+              <fieldset className="stack">
+                <legend>Background</legend>
+                <div className="count-row">
                   {SHEET_BACKGROUNDS.map((option) => (
                     <button
                       key={option.id}
@@ -673,22 +667,18 @@ export function StickerSheet({
                       aria-pressed={background === option.id}
                       title={option.label}
                       onClick={() => setBackground(option.id)}
-                      className={`h-9 w-9 rounded-full border ${
-                        background === option.id
-                          ? "border-stone-900 ring-2 ring-stone-900 ring-offset-2"
-                          : "border-stone-200"
-                      } ${option.color ? "" : "sheet-checker"}`}
+                      className={`swatch${option.color ? "" : " sheet-checker"}`}
                       style={option.color ? { backgroundColor: option.color } : undefined}
                     />
                   ))}
                 </div>
-                <p className="text-xs text-muted">{backgroundLabel}</p>
+                <p className="muted">{backgroundLabel}</p>
               </fieldset>
 
-              <label className="block space-y-2">
-                <span className="flex items-center justify-between text-sm font-medium">
+              <label className="stack">
+                <span className="nav-actions">
                   Border
-                  <span className="font-normal text-muted">
+                  <span className="muted">
                     {padding === 0 ? "Thin" : padding >= 22 ? "Wide" : "White edge"}
                   </span>
                 </span>
@@ -702,16 +692,14 @@ export function StickerSheet({
                   aria-valuenow={padding}
                   aria-label="Sticker border"
                   onChange={(event) => setPadding(Number(event.target.value))}
-                  className="w-full accent-[var(--accent)]"
+                  className="field"
                 />
               </label>
             </div>
 
-            <div className="space-y-3">
+            <div className="stack">
               <div
-                className={`relative mx-auto overflow-hidden rounded-2xl border border-border ${
-                  size === "square" ? "max-w-lg" : "max-w-sm"
-                } ${background === "transparent" ? "sheet-checker" : "bg-white"}`}
+                className={`sheet-frame${background === "transparent" ? " sheet-checker" : ""}`}
               >
                 <canvas
                   ref={canvasRef}
@@ -721,7 +709,7 @@ export function StickerSheet({
                 />
                 {pendingStyles > 0 ? <MakingProgress count={pendingStyles} variant="overlay" /> : null}
               </div>
-              <p className="text-center text-sm text-muted">{sheetNote}</p>
+              <p className="muted">{sheetNote}</p>
             </div>
           </div>
 
@@ -729,29 +717,29 @@ export function StickerSheet({
             type="button"
             onClick={() => void download()}
             disabled={downloading || (permanent && (loading || !ready))}
-            className="w-full rounded-full bg-accent px-8 py-4 text-base font-semibold text-white shadow-sm hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-primary btn-block"
           >
             {downloading ? "Getting the print file ready…" : "Download my sheet"}
           </button>
           {error ? (
-            <p role="alert" className="text-center text-sm text-red-600">
+            <p role="alert" className="alert">
               {error}
             </p>
           ) : (
-            <div className="space-y-1 text-center">
-              <p className="text-sm text-muted" role="status">
+            <div className="stack">
+              <p className="muted" role="status">
                 {summary}
               </p>
               {permanent && saveNote ? (
                 <p
                   role={saveNote.startsWith("Couldn't") ? "alert" : "status"}
-                  className={`text-sm ${saveNote.startsWith("Couldn't") ? "text-red-600" : "text-muted"}`}
+                  className={saveNote.startsWith("Couldn't") ? "alert" : "muted"}
                 >
                   {saveNote}
                 </p>
               ) : null}
               {!loading && !permanent ? (
-                <p className="text-sm text-muted">Free to try. We only ask you to sign in when you download, and your photos stay put.</p>
+                <p className="muted">Free to try. We only ask you to sign in when you download, and your photos stay put.</p>
               ) : null}
             </div>
           )}

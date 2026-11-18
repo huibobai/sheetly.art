@@ -14,29 +14,31 @@ export function OpeningSoon({
 
   if (!isPrelaunch()) {
     return (
-      <section className="sticker-panel space-y-3 p-6 sm:p-8">
-        <Title className="font-display text-3xl font-bold tracking-tight">Sheetly is open</Title>
-        <p className="max-w-2xl text-base leading-7 text-muted">
-          Make a sticker sheet on the home page. You can download it and print it at home.
-        </p>
-        <Link href="/" className="inline-flex font-bold underline">
-          Make a sheet
-        </Link>
+      <section className="band">
+        <div className="container stack-lg">
+          <Title>Sheetly is open</Title>
+          <p className="lead">Make a sticker sheet on the home page. You can download it and print it at home.</p>
+          <Link href="/" className="btn btn-primary">
+            Make a sheet
+          </Link>
+        </div>
       </section>
     );
   }
 
   return (
-    <section id="opening-soon" aria-labelledby="opening-soon-heading" className="sticker-panel space-y-4 p-6 sm:p-8">
-      <p className="inline-block -rotate-2 rounded-full bg-sun px-3 py-1 text-sm font-semibold text-ink">Opening soon</p>
-      <Title id="opening-soon-heading" className="font-display text-3xl font-bold tracking-tight sm:text-4xl">
-        Sheetly is opening soon
-      </Title>
-      <p className="max-w-2xl text-base leading-7 text-muted">
-        You can try the sticker maker and download a sheet to print at home. Printed sheets are not for sale yet, and
-        there is no checkout.
-      </p>
-      <WaitlistForm source={source} />
+    <section id="opening-soon" aria-labelledby="opening-soon-heading" className="band">
+      <div className="container stack-lg">
+        <div className="section-head">
+          <p className="prelaunch-badge">Opening soon</p>
+          <Title id="opening-soon-heading">Sheetly is opening soon</Title>
+          <p className="lead">
+            You can try the sticker maker and download a sheet to print at home. Printed sheets are not for sale yet,
+            and there is no checkout.
+          </p>
+        </div>
+        <WaitlistForm source={source} />
+      </div>
     </section>
   );
 }

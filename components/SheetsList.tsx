@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { DemoSheet } from "@/components/DemoSheet";
 import { SignInPrompt } from "@/components/SignInPrompt";
 import { SheetThumbnail } from "@/components/SheetThumbnail";
 import { useAuth } from "@/components/AuthProvider";
@@ -99,33 +100,41 @@ export function SheetsList() {
   }, [loading, permanent]);
 
   if (loading || (permanent && status === "loading")) {
-    return <p className="text-sm text-muted">Loading your sheets…</p>;
+    return <p className="muted">Loading your sheets…</p>;
   }
 
   if (!permanent) {
     return (
-      <div className="max-w-lg space-y-4 rounded-3xl border border-border bg-surface p-6">
-        <p className="text-sm leading-6 text-muted">
-          Sign in to see sheets you have saved. You can still make a sheet on the home page before you sign in.
-        </p>
-        <button
-          type="button"
-          onClick={() => setSignInOpen(true)}
-          aria-haspopup="dialog"
-          className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium hover:border-stone-300"
-        >
-          Sign in
-        </button>
-        {signInOpen ? (
-          <SignInPrompt open purpose="save" onClose={() => setSignInOpen(false)} onSignedIn={() => setSignInOpen(false)} />
-        ) : null}
+      <div className="library-empty">
+        <DemoSheet look="photo" />
+        <div className="library-copy">
+          <h1>My sheets</h1>
+          <p>Open a saved sheet to download it again.</p>
+          <button
+            type="button"
+            onClick={() => setSignInOpen(true)}
+            aria-haspopup="dialog"
+            className="btn btn-primary"
+          >
+            Sign in
+          </button>
+          <Link href="/" className="btn btn-ghost">
+            New sheet
+          </Link>
+          <p className="muted">
+            Sign in to see sheets you have saved. You can still make a sheet on the home page before you sign in.
+          </p>
+          {signInOpen ? (
+            <SignInPrompt open purpose="save" onClose={() => setSignInOpen(false)} onSignedIn={() => setSignInOpen(false)} />
+          ) : null}
+        </div>
       </div>
     );
   }
 
   if (status === "error") {
     return (
-      <p role="alert" className="text-sm text-red-600">
+      <p role="alert" className="alert">
         Could not load your sheets.
       </p>
     );
@@ -133,14 +142,30 @@ export function SheetsList() {
 
   if (sheets.length === 0) {
     return (
-      <p className="text-sm text-muted">
-        You have not saved a sheet yet. Make one on the home page while signed in.
-      </p>
+      <div className="stack-lg">
+        <div className="library-top">
+          <h1>My sheets</h1>
+          <Link href="/" className="btn btn-ghost">
+            New sheet
+          </Link>
+        </div>
+        <div className="library-empty">
+          <DemoSheet look="outline" />
+          <p>You have not saved a sheet yet. Make one on the home page while signed in.</p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="stack-lg">
+      <div className="library-top">
+        <h1>My sheets</h1>
+        <Link href="/" className="btn btn-ghost">
+          New sheet
+        </Link>
+      </div>
+      <ul className="sheet-cards">
       {sheets.map((sheet) => {
         const background =
           SHEET_BACKGROUNDS.find((item) => item.id === sheet.background)?.label ?? sheet.background;
@@ -163,31 +188,30 @@ export function SheetsList() {
 
         return (
           <li key={sheet.id}>
-            <Link
-              href={`/?sheet=${sheet.id}`}
-              className="block overflow-hidden rounded-2xl border border-border bg-surface transition-colors hover:border-stone-300"
-            >
-              <div className="relative aspect-square overflow-hidden bg-stone-50">
+            <Link href={`/?sheet=${sheet.id}`} className="sheet-card">
+              <div className="sheet-card-face">
                 <SheetThumbnail sheet={sheet} />
               </div>
-              <div className="space-y-2 p-4">
-                <p className="text-sm font-medium">
-                  {photos.length > 1 ? `${photos.length} photos · ` : ""}
-                  {sheet.sticker_count} stickers · {sheetSizeLabel(sheet.sheet_size)}
+              <div className="sheet-card-body">
+                <p>
+                  {photos.length > 1 ? `${photos.length} photos` : "One photo"}
                 </p>
                 <p>
-                  <span className="inline-flex rounded-full bg-stone-900 px-3 py-1 text-sm font-semibold text-white">
-                    {label}
-                  </span>
+                  {sheet.sticker_count} stickers, {sheetSizeLabel(sheet.sheet_size)}
                 </p>
-                <p className="text-sm text-muted">
-                  {background} · {created}
+                <p>
+                  <span className="sheet-card-tag">{label}</span>
                 </p>
+                <p className="muted">
+                  {background}
+                </p>
+                <p className="muted">{created}</p>
               </div>
             </Link>
           </li>
         );
       })}
     </ul>
+    </div>
   );
 }
