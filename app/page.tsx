@@ -1,8 +1,10 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { OpeningSoon } from "@/components/OpeningSoon";
 import { StickerCreator } from "@/components/StickerCreator";
 import { UploadLink } from "@/components/UploadLink";
 import { PRIVACY_NOTICE, SHEET_CUT_LINE } from "@/lib/copy";
+import { isPrelaunch } from "@/lib/launch";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -53,6 +55,8 @@ export default function Home({ searchParams }: PageProps<"/">) {
           <p className="statement">Printed and delivered to your door is coming soon.</p>
         </div>
       </section>
+
+      {isPrelaunch() ? <OpeningSoon source="homepage" /> : null}
 
       <section className="band band-cut reveal">
         <div className="container cut-layout">
