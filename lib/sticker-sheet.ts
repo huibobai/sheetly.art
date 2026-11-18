@@ -468,7 +468,7 @@ function backgroundSample(data: Uint8ClampedArray, width: number, height: number
   return { red, green, blue, tolerance, toleranceSq: tolerance * tolerance };
 }
 
-function subjectMask(data: Uint8ClampedArray, width: number, height: number) {
+export function subjectMask(data: Uint8ClampedArray, width: number, height: number) {
   const count = width * height;
   const subject = new Uint8Array(count);
   const background = backgroundSample(data, width, height);
@@ -589,8 +589,36 @@ function subjectMask(data: Uint8ClampedArray, width: number, height: number) {
   }
 
   erodeSubject(subject, width, height, 2.25);
+  // Keep the subject and anything still beside it. A floor or furniture island is
+  // dropped even when it is too big to be a speck. Pieces cut off by the photo
+  // edge lose to a real subject that sits fully inside the frame.
+  retainSubjectComponents(subject, width, height, 8, opaqueBounds(data, width, height));
   removeSpecks(subject, width, height);
   return subject;
+}
+
+function opaqueBounds(data: Uint8ClampedArray, width: number, height: number) {
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let any = false;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[(y * width + x) * 4 + 3] < 20) {
+        continue;
+      }
+      any = true;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!any) {
+    return { minX: 0, minY: 0, maxX: Math.max(0, width - 1), maxY: Math.max(0, height - 1) };
+  }
+  return { minX, minY, maxX, maxY };
 }
 
 function erodeSubject(subject: Uint8Array, width: number, height: number, radius: number) {
@@ -607,11 +635,10 @@ function erodeSubject(subject: Uint8Array, width: number, height: number, radius
   }
 }
 
-function removeSpecks(subject: Uint8Array, width: number, height: number) {
+function labelComponents(subject: Uint8Array, width: number, height: number) {
   const seen = new Uint8Array(subject.length);
   const queue = new Int32Array(subject.length);
   const components: number[][] = [];
-  let total = 0;
 
   for (let start = 0; start < subject.length; start += 1) {
     if (!subject[start] || seen[start]) {
@@ -648,10 +675,91 @@ function removeSpecks(subject: Uint8Array, width: number, height: number) {
         }
       }
     }
-    total += pixels.length;
     components.push(pixels);
   }
 
+  return components;
+}
+
+type MaskFrame = { minX: number; minY: number; maxX: number; maxY: number };
+
+function componentTouchesFrame(pixels: number[], width: number, frame: MaskFrame) {
+  for (const index of pixels) {
+    const x = index % width;
+    const y = (index / width) | 0;
+    if (x <= frame.minX + 1 || y <= frame.minY + 1 || x >= frame.maxX - 1 || y >= frame.maxY - 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Keep the main subject and pieces that touch it. Everything else is cleared.
+ * The subject is the largest piece. A piece cut off by the photo edge is not the
+ * subject when another piece inside the frame is at least half as big — that is
+ * the dog, and the edge piece is a floor or furniture fragment.
+ */
+export function retainSubjectComponents(
+  subject: Uint8Array,
+  width: number,
+  height: number,
+  touchRadius: number,
+  frame?: MaskFrame,
+) {
+  const components = labelComponents(subject, width, height);
+  if (components.length <= 1) {
+    return;
+  }
+  const bounds = frame ?? { minX: 0, minY: 0, maxX: width - 1, maxY: height - 1 };
+  let largest = components[0];
+  let largestInside: number[] | null = null;
+  for (const pixels of components) {
+    if (pixels.length > largest.length) {
+      largest = pixels;
+    }
+    if (!componentTouchesFrame(pixels, width, bounds) && (!largestInside || pixels.length > largestInside.length)) {
+      largestInside = pixels;
+    }
+  }
+  const main =
+    largestInside &&
+    componentTouchesFrame(largest, width, bounds) &&
+    largestInside.length * 2 >= largest.length
+      ? largestInside
+      : largest;
+  const core = new Uint8Array(subject.length);
+  for (const index of main) {
+    core[index] = 1;
+  }
+  const near = dilateMask(core, width, height, touchRadius);
+  for (const pixels of components) {
+    if (pixels === main) {
+      continue;
+    }
+    let touches = false;
+    for (const index of pixels) {
+      if (near[index]) {
+        touches = true;
+        break;
+      }
+    }
+    if (!touches) {
+      continue;
+    }
+    for (const index of pixels) {
+      core[index] = 1;
+    }
+  }
+  subject.set(core);
+}
+
+function removeSpecks(subject: Uint8Array, width: number, height: number) {
+  const components = labelComponents(subject, width, height);
+  let total = 0;
+  for (const pixels of components) {
+    total += pixels.length;
+  }
   const minimum = Math.max(36, Math.round(total * 0.012));
   for (const pixels of components) {
     if (pixels.length >= minimum) {
