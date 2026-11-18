@@ -2,13 +2,10 @@
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { compressImage } from "@/lib/compress-image";
-import { buildUploadPath, PRIVATE_UPLOADS_BUCKET, privateUploadRef } from "@/lib/image-source";
+import { UploadFailure, uploadPrivateImage } from "@/lib/private-upload";
 import { createClient } from "@/lib/supabase/client";
-import { supabaseAnonKey, supabaseUrl } from "@/lib/supabase/env";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-// Private bucket; objects are stored under the signed-in user's id (see the storage policies migration).
-const BUCKET = PRIVATE_UPLOADS_BUCKET;
 
 const ACCEPTED_TYPES: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -49,61 +46,6 @@ function validateFile(file: File) {
   }
 
   return null;
-}
-
-function uploadCompressedImage(
-  path: string,
-  body: Blob,
-  contentType: string,
-  accessToken: string,
-  onProgress: (percent: number) => void,
-) {
-  const supabaseUrlValue = supabaseUrl().replace(/\/$/, "");
-  const supabaseKey = supabaseAnonKey();
-
-  return new Promise<void>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${supabaseUrlValue}/storage/v1/object/${BUCKET}/${path}`);
-    // The user's own JWT, so the storage policy can check the `{auth.uid()}/` folder.
-    xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
-    xhr.setRequestHeader("apikey", supabaseKey);
-    xhr.setRequestHeader("Content-Type", contentType);
-    xhr.setRequestHeader("cache-control", "max-age=3600");
-    xhr.setRequestHeader("x-upsert", "false");
-
-    xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable || event.total === 0) {
-        return;
-      }
-      onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        onProgress(100);
-        resolve();
-        return;
-      }
-
-      let message = "";
-      try {
-        const body = JSON.parse(xhr.responseText) as { message?: string };
-        message = body.message ?? "";
-      } catch {
-        message = "";
-      }
-
-      if (/row-level security|unauthorized|access denied/i.test(message)) {
-        reject(new Error("permission"));
-        return;
-      }
-
-      reject(new Error("upload failed"));
-    };
-    xhr.onerror = () => reject(new Error("upload failed"));
-    xhr.onabort = () => reject(new Error("upload failed"));
-    xhr.send(body);
-  });
 }
 
 export function PhotoUpload({
@@ -209,11 +151,15 @@ export function PhotoUpload({
       }
       stage = "uploading";
       setPhase("uploading");
-      const path = buildUploadPath(session.user.id, compressed.extension, crypto.randomUUID());
-      await uploadCompressedImage(path, compressed.blob, compressed.contentType, session.access_token, setProgress);
-
-      // Not a public URL: a durable reference that /api/sheet-image and /api/generate resolve server-side.
-      const storedRef = privateUploadRef(supabaseUrl(), path);
+      const storedRef = await uploadPrivateImage({
+        userId: session.user.id,
+        fileId: crypto.randomUUID(),
+        blob: compressed.blob,
+        contentType: compressed.contentType,
+        extension: compressed.extension,
+        accessToken: session.access_token,
+        onProgress: setProgress,
+      });
       if (onPhoto) {
         onPhotoStored?.(photoId, storedRef);
       } else if (!asExtra) {
@@ -223,20 +169,18 @@ export function PhotoUpload({
       }
       return true;
     } catch (caught) {
+      const failure = caught instanceof UploadFailure ? caught : null;
       if (onPhoto && stage !== "compressing") {
-        onPhotoFailed?.(photoId, "upload");
+        onPhotoFailed?.(photoId, failure?.userMessage ?? "upload");
         return true;
       }
       if (asExtra && stage !== "compressing") {
         return true;
       }
-      const denied = caught instanceof Error && caught.message === "permission";
       setError(
         stage === "compressing"
           ? "We couldn't read that image. Please try another file."
-          : denied
-            ? "Upload didn't go through. Storage blocked this photo. Please try again."
-            : "Upload didn't go through. Please try again.",
+          : (failure?.userMessage ?? "Upload didn't go through. Please try again."),
       );
       return false;
     } finally {
