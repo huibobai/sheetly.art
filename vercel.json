@@ -15,6 +15,9 @@
     },
     "app/api/guest-migrate/route.ts": {
       "regions": ["dub1"]
+    },
+    "app/api/waitlist/route.ts": {
+      "regions": ["dub1"]
     }
   }
 }

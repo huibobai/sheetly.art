@@ -9,6 +9,11 @@
  * - GUEST_GENERATE_DAILY_LIMIT (AI styles per anonymous visitor per rolling 24 h, default 3)
  * - GUEST_IP_DAILY_LIMIT (AI styles per IP across anonymous visitors per rolling 24 h, default 9)
  * - GUEST_IP_PER_MINUTE_LIMIT (AI styles per IP across anonymous visitors per rolling minute, default 6)
+ * Pre-launch (see lib/launch.ts and README):
+ * - NEXT_PUBLIC_PRELAUNCH_MODE (unset means on; set to false and redeploy to open)
+ * - PRELAUNCH_MODE (optional server fallback when the public variable is blank)
+ * - NEXT_PUBLIC_SITE_URL (optional absolute origin for sitemap.xml)
+ * - WAITLIST_IP_PER_MINUTE_LIMIT / WAITLIST_IP_DAILY_LIMIT (signup attempts per IP)
  */
 
 export function supabaseUrl() {

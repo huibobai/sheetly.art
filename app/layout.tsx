@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { Fredoka, Geist } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
 import { Header } from "@/components/Header";
+import { PrelaunchBanner } from "@/components/PrelaunchBanner";
 import { SiteFooter } from "@/components/SiteFooter";
+import { isPrelaunch, layoutRobots } from "@/lib/launch";
 import "./globals.css";
 
 const geist = Geist({
@@ -16,9 +18,12 @@ const display = Fredoka({
   weight: "700",
 });
 
+const prelaunch = isPrelaunch();
+
 export const metadata: Metadata = {
   title: "sheetly.art · Turn any photo into a sticker sheet",
   description: "Add a picture, pick a look, and watch your sticker sheet come together. Print it at home.",
+  ...(prelaunch ? { robots: layoutRobots(true) } : {}),
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -31,6 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body>
         <AuthProvider>
+          <PrelaunchBanner />
           <Header />
           <main>{children}</main>
           <SiteFooter />
