@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PRIVACY_NOTICE, SHEET_CUT_LINE, SIGN_IN_PRIVACY_NOTICE } from "../lib/copy.ts";
+import { SHEET_CUT_LINE, SIGN_IN_PRIVACY_NOTICE } from "../lib/copy.ts";
 import {
   buildSheetState,
   clearSheetState,
@@ -90,12 +90,9 @@ test("download intent without a stored photo is not persisted", () => {
   assert.deepEqual(built, { ok: false, reason: "no-stored-photos" });
 });
 
-test("privacy lines still name the photo upload, fal.ai, and FLUX", () => {
-  for (const text of [PRIVACY_NOTICE, SIGN_IN_PRIVACY_NOTICE]) {
-    assert.match(text, /photo/i);
-    assert.match(text, /fal\.ai/);
-    assert.match(text, /Black Forest Labs/);
-    assert.match(text, /FLUX/);
-  }
+test("sign-in note keeps the private-storage line and does not name an image vendor", () => {
+  assert.match(SIGN_IN_PRIVACY_NOTICE, /photo/i);
+  assert.match(SIGN_IN_PRIVACY_NOTICE, /private storage/);
+  assert.doesNotMatch(SIGN_IN_PRIVACY_NOTICE, /fal\.ai|Black Forest Labs|FLUX/i);
   assert.equal(SHEET_CUT_LINE, "Dashed lines = where the scissors go");
 });

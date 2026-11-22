@@ -85,7 +85,7 @@ export function WaitlistForm({ source }: { source: WaitlistSource }) {
         />
         <span>
           {WAITLIST_CONSENT_LABEL}{" "}
-          <Link href="/#privacy">Privacy</Link>
+          <Link href="/privacy">Privacy</Link>
         </span>
       </label>
       {status === "error" ? (
