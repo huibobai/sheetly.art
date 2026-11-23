@@ -1,3 +1,9 @@
+/**
+ * Print gate: no sheet may be sent to print unless public.sheets.review_status = 'approved'.
+ * review_status, reviewed_at, and reviewed_by are not selected or written here.
+ * Clients cannot set them. See supabase/migrations/20261111120000_sheet_review_status.sql.
+ */
+
 import { SHEET_BACKGROUNDS, SHEET_COUNTS, SHEET_SIZES } from "@/lib/sticker-sheet";
 import type { SheetBackground, SheetCount, SheetSize } from "@/lib/sticker-sheet";
 import { isStickerStyle, styleIdFromUrl, urlWithoutStyle } from "@/lib/sticker-styles";
